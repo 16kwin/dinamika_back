@@ -9,5 +9,5 @@ public class DinamikaBackApplication {
 	public static void main(String[] args) {
 		SpringApplication.run(DinamikaBackApplication.class, args);
 	}
-
+  
 }
