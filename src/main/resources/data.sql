@@ -7,7 +7,7 @@ WHERE NOT EXISTS (SELECT 1 FROM roles WHERE name = 'ADMIN');
 -- Пароль: Tuduta95 (хешированный BCrypt)
 INSERT INTO users (username, password, first_name, middle_name, last_name, role_id)
 SELECT 'admin', 
-       '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVFUiA', -- Tuduta95
+       '$2a$12$JHJRYuHX7/rkte1QhaBLr.vpk1d7uLZKv008VfxdEsrt8wAouCev.', -- Tuduta95
        'Admin',
        'Adminovich',
        'Administrator',
