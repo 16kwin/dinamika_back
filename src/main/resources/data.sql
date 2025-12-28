@@ -13,3 +13,66 @@ SELECT 'admin',
        'Administrator',
        (SELECT id FROM roles WHERE name = 'ADMIN')
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin');
+
+-- Создание тестовой модели станции если её нет
+INSERT INTO station_model (model_number)
+SELECT 100
+WHERE NOT EXISTS (SELECT 1 FROM station_model WHERE model_number = 100);
+
+-- Создание тестового завода если его нет
+INSERT INTO location (location_name, level)
+SELECT 'Тестовый завод', 1
+WHERE NOT EXISTS (SELECT 1 FROM location WHERE location_name = 'Тестовый завод' AND level = 1);
+
+-- Создание тестового цеха если его нет
+INSERT INTO location (location_name, level)
+SELECT 'Тестовый цех', 2
+WHERE NOT EXISTS (SELECT 1 FROM location WHERE location_name = 'Тестовый цех' AND level = 2);
+
+-- Создание тестового участка если его нет
+INSERT INTO location (location_name, level)
+SELECT 'Тестовый участок', 3
+WHERE NOT EXISTS (SELECT 1 FROM location WHERE location_name = 'Тестовый участок' AND level = 3);
+
+-- Связь: Тестовый цех → Тестовый завод (если связи нет)
+INSERT INTO location_dependency (child_location_id, parent_location_id)
+SELECT 
+    (SELECT id FROM location WHERE location_name = 'Тестовый цех' AND level = 2),
+    (SELECT id FROM location WHERE location_name = 'Тестовый завод' AND level = 1)
+WHERE NOT EXISTS (
+    SELECT 1 FROM location_dependency 
+    WHERE child_location_id = (SELECT id FROM location WHERE location_name = 'Тестовый цех' AND level = 2)
+);
+
+-- Связь: Тестовый участок → Тестовый цех (если связи нет)
+INSERT INTO location_dependency (child_location_id, parent_location_id)
+SELECT 
+    (SELECT id FROM location WHERE location_name = 'Тестовый участок' AND level = 3),
+    (SELECT id FROM location WHERE location_name = 'Тестовый цех' AND level = 2)
+WHERE NOT EXISTS (
+    SELECT 1 FROM location_dependency 
+    WHERE child_location_id = (SELECT id FROM location WHERE location_name = 'Тестовый участок' AND level = 3)
+);
+
+-- Создание тестового станка если его нет
+-- Станок привязан к участку (все три уровня)
+INSERT INTO station (
+    station_name, 
+    station_model_id, 
+    serial_number, 
+    current_capacity, 
+    ip_address, 
+    level_1_factory_id, 
+    level_2_object_id, 
+    level_3_zone_id
+)
+SELECT 
+    'Тестовый станок',
+    (SELECT id FROM station_model WHERE model_number = 100),
+    12345,
+    500,
+    '192.168.1.100',
+    (SELECT id FROM location WHERE location_name = 'Тестовый завод' AND level = 1),
+    (SELECT id FROM location WHERE location_name = 'Тестовый цех' AND level = 2),
+    (SELECT id FROM location WHERE location_name = 'Тестовый участок' AND level = 3)
+WHERE NOT EXISTS (SELECT 1 FROM station WHERE station_name = 'Тестовый станок');
