@@ -47,6 +47,13 @@ public class MakeStationService {
             dto.getSerialNumber(),
             dto.getCurrentCapacity(),
             dto.getIpAddress(),
+            dto.getIsEnabled() != null ? dto.getIsEnabled() : true, // По умолчанию включена
+            dto.getCapacity(),
+            dto.getFullness() != null ? dto.getFullness() : 0, // По умолчанию 0
+            dto.getHasErrors() != null ? dto.getHasErrors() : false, // По умолчанию нет ошибок
+            dto.getIssued() != null ? dto.getIssued() : 0,
+            dto.getIssuedOverNorm() != null ? dto.getIssuedOverNorm() : 0,
+            dto.getFinishedParts() != null ? dto.getFinishedParts() : 0,
             level1Factory,
             level2Object,
             level3Zone
@@ -83,6 +90,31 @@ public class MakeStationService {
         // Проверка IP адреса (базовая)
         if (!dto.getIpAddress().matches("^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$")) {
             throw new IllegalArgumentException("Неверный формат IP адреса");
+        }
+        
+        // Проверка числовых полей на отрицательные значения
+        if (dto.getCurrentCapacity() < 0) {
+            throw new IllegalArgumentException("Текущая емкость не может быть отрицательной");
+        }
+        
+        if (dto.getCapacity() != null && dto.getCapacity() < 0) {
+            throw new IllegalArgumentException("Вместимость не может быть отрицательной");
+        }
+        
+        if (dto.getFullness() != null && dto.getFullness() < 0) {
+            throw new IllegalArgumentException("Заполненность не может быть отрицательной");
+        }
+        
+        if (dto.getIssued() != null && dto.getIssued() < 0) {
+            throw new IllegalArgumentException("Выдано не может быть отрицательным");
+        }
+        
+        if (dto.getIssuedOverNorm() != null && dto.getIssuedOverNorm() < 0) {
+            throw new IllegalArgumentException("Выдано сверхнормы не может быть отрицательным");
+        }
+        
+        if (dto.getFinishedParts() != null && dto.getFinishedParts() < 0) {
+            throw new IllegalArgumentException("Готовых деталей не может быть отрицательным");
         }
     }
     

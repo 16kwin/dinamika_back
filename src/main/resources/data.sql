@@ -62,17 +62,31 @@ INSERT INTO station (
     serial_number, 
     current_capacity, 
     ip_address, 
+    is_enabled,
+    capacity,
+    fullness,
+    has_errors,
+    issued,
+    issued_over_norm,
+    finished_parts,
     level_1_factory_id, 
     level_2_object_id, 
     level_3_zone_id
 )
 SELECT 
-    'Тестовый станок',
+    'Тестовая станция',
     (SELECT id FROM station_model WHERE model_number = 100),
     12345,
     500,
     '192.168.1.100',
+    true, -- is_enabled
+    1000, -- capacity
+    350,  -- fullness
+    false, -- has_errors
+    150,   -- issued
+    25,    -- issued_over_norm
+    85,    -- finished_parts
     (SELECT id FROM location WHERE location_name = 'Тестовый завод' AND level = 1),
     (SELECT id FROM location WHERE location_name = 'Тестовый цех' AND level = 2),
     (SELECT id FROM location WHERE location_name = 'Тестовый участок' AND level = 3)
-WHERE NOT EXISTS (SELECT 1 FROM station WHERE station_name = 'Тестовый станок');
+WHERE NOT EXISTS (SELECT 1 FROM station WHERE station_name = 'Тестовая станция');

@@ -68,7 +68,14 @@ public class LocationService {
                     station.getStationName(),
                     station.getStationModel().getModelNumber(),
                     station.getSerialNumberOfTheStation(),
-                    station.getCurrentCapacityOfTheStation()
+                    station.getCurrentCapacityOfTheStation(),
+                    station.getIsEnabled(),
+                    station.getCapacity(),
+                    station.getFullness(),
+                    station.getHasErrors(),
+                    station.getIssued(),
+                    station.getIssuedOverNorm(),
+                    station.getFinishedParts()
                 ))
                 .collect(Collectors.toList());
         

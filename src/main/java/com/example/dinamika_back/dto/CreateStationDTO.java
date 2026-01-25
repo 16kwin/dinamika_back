@@ -12,6 +12,15 @@ public class CreateStationDTO {
     private Integer currentCapacity;
     private String ipAddress;
     
+    // Новые поля
+    private Boolean isEnabled;
+    private Integer capacity;
+    private Integer fullness;
+    private Boolean hasErrors;
+    private Integer issued;
+    private Integer issuedOverNorm;
+    private Integer finishedParts;
+    
     // ID локаций (могут быть null)
     private Integer level1FactoryId;
     private Integer level2ObjectId;
