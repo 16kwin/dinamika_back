@@ -23,6 +23,16 @@ public class Location {
     @Column(name = "level", nullable = false)
     private Integer level; // 1, 2 или 3
 
+    // Новые поля для фото
+    @Column(name = "photo_file_name")
+    private String photoFileName;
+
+    @Column(name = "photo_file_path")
+    private String photoFilePath;
+
+    @Column(name = "photo_file_extension")
+    private String photoFileExtension;
+
     public Location(String locationName, Integer level) {
         this.locationName = locationName;
         this.level = level;

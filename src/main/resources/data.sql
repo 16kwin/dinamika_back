@@ -1,3 +1,9 @@
+-- Добавляем колонки для фото в таблицу location
+ALTER TABLE location 
+ADD COLUMN IF NOT EXISTS photo_file_name VARCHAR(255),
+ADD COLUMN IF NOT EXISTS photo_file_path VARCHAR(500),
+ADD COLUMN IF NOT EXISTS photo_file_extension VARCHAR(10);
+
 -- Создание роли ADMIN если её нет
 INSERT INTO roles (name, description) 
 SELECT 'ADMIN', 'Администратор системы'
@@ -90,3 +96,12 @@ SELECT
     (SELECT id FROM location WHERE location_name = 'Тестовый цех' AND level = 2),
     (SELECT id FROM location WHERE location_name = 'Тестовый участок' AND level = 3)
 WHERE NOT EXISTS (SELECT 1 FROM station WHERE station_name = 'Тестовая станция');
+
+-- ИСПРАВЛЕННЫЙ ЗАПРОС: используем station(id) вместо station(uid)
+CREATE TABLE IF NOT EXISTS station_position (
+    id SERIAL PRIMARY KEY,
+    station_id INTEGER NOT NULL REFERENCES station(id) ON DELETE CASCADE, -- ИЗМЕНЕНИЕ ЗДЕСЬ
+    location_id INTEGER NOT NULL REFERENCES location(id) ON DELETE CASCADE,
+    coord_x INTEGER NOT NULL DEFAULT 0, -- координата X (от 0 до ширины картинки)
+    coord_y INTEGER NOT NULL DEFAULT 0 -- координата Y (от 0 до высоты картинки)
+);

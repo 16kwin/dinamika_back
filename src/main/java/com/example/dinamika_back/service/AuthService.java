@@ -9,7 +9,6 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import com.example.dinamika_back.model.User;
 import com.example.dinamika_back.repository.RoleRepository;
-import com.example.dinamika_back.repository.UserRepository;
 
 import java.util.List;
 import java.util.Optional;

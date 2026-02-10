@@ -96,21 +96,42 @@ public class SecurityConfig {
             .authorizeHttpRequests(authorizeHttpRequests ->
                     authorizeHttpRequests
                             .requestMatchers("/error", "/api/auth/*", "/logout").permitAll()
+                            
+                            // ИСПРАВЛЕНО: Конкретные пути для фото
+                            .requestMatchers(HttpMethod.GET, "/api/locations/*/photo").permitAll()
+                            .requestMatchers(HttpMethod.POST, "/api/locations/*/photo").authenticated()
+                            .requestMatchers(HttpMethod.DELETE, "/api/locations/*/photo").authenticated()
+                            
+                            // Доступ к файлам
+                            .requestMatchers("/uploads/**").permitAll()
+                            
+                            // Существующие location эндпоинты (без фото)
+                            .requestMatchers(HttpMethod.GET, "/api/locations/hierarchy").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/locations/hierarchy/first").permitAll()
+                            .requestMatchers(HttpMethod.POST, "/api/locations").authenticated()
+                            
+                            // Станции
+                            .requestMatchers(HttpMethod.POST, "/api/stations").authenticated()
+                            
+                            // Карточки животных
                             .requestMatchers(HttpMethod.POST,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
                             .requestMatchers(HttpMethod.PATCH,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
                             .requestMatchers(HttpMethod.DELETE,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
 
+                            // Документы
                             .requestMatchers(HttpMethod.POST,"/api/docs/**").hasAnyRole("ADMIN", "OPERATOR")
                             .requestMatchers(HttpMethod.PATCH,"/api/docs/**").hasAnyRole("ADMIN", "OPERATOR")
                             .requestMatchers(HttpMethod.DELETE,"/api/docs/**").hasAnyRole("ADMIN", "OPERATOR")
 
+                            // Информация
                             .requestMatchers(HttpMethod.POST,"/api/information/**").hasRole("ADMIN")
                             .requestMatchers(HttpMethod.PATCH,"/api/information/**").hasRole("ADMIN")
                             .requestMatchers(HttpMethod.DELETE,"/api/information/**").hasRole("ADMIN")
 
-
+                            // Уведомления
                             .requestMatchers("/api/notification/**").hasAnyRole("ADMIN", "OPERATOR")
 
+                            // Пользователи
                             .requestMatchers("/api/users/**").hasRole("ADMIN")
 
                             .anyRequest().authenticated())
