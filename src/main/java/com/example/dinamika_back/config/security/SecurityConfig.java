@@ -95,7 +95,7 @@ public class SecurityConfig {
             .addFilterAfter(new GetCsrfTokenFilter(), ExceptionTranslationFilter.class)
             .authorizeHttpRequests(authorizeHttpRequests ->
                     authorizeHttpRequests
-                            .requestMatchers("/error", "/api/auth/*", "/logout").permitAll()
+                            .requestMatchers("/error", "/api/auth/*", "/logout",  "/api/auth/check_password").permitAll()
                             
                             // ИСПРАВЛЕНО: Конкретные пути для фото
                             .requestMatchers(HttpMethod.GET, "/api/locations/*/photo").permitAll()

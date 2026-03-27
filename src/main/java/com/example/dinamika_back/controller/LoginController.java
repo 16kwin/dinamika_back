@@ -19,6 +19,7 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import com.example.dinamika_back.config.security.*;
@@ -28,11 +29,8 @@ import com.example.dinamika_back.service.*;
 import com.example.dinamika_back.service.RefreshTokenService;
 import com.example.dinamika_back.service.UserService;
 
-
-import javax.swing.text.html.Option;
 import java.text.ParseException;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
@@ -58,6 +56,7 @@ public class LoginController {
     private final TokenCookieSessionAuthenticationStrategy tokenCookieSessionAuthenticationStrategy;
     private final UserService userService;
     private final RefreshTokenService refreshTokenService;
+    private final PasswordEncoder passwordEncoder;
     private Function<String, Token> tokenDeserializer;
     private Function<Token, String> tokenSerializer;
 
@@ -69,12 +68,14 @@ public class LoginController {
                            TokenCookieSessionAuthenticationStrategy tokenCookieSessionAuthenticationStrategy,
                            UserService userService,
                            RefreshTokenService refreshTokenService,
-                           TokenCookieJweStringSerializer jweStringSerializer) throws ParseException, KeyLengthException {
+                           TokenCookieJweStringSerializer jweStringSerializer,
+                           PasswordEncoder passwordEncoder) throws ParseException, KeyLengthException {
         this.authenticationManager = authenticationManager;
         this.tokenCookieSessionAuthenticationStrategy = tokenCookieSessionAuthenticationStrategy;
         this.userService = userService;
         this.refreshTokenService = refreshTokenService;
         this.tokenSerializer = jweStringSerializer;
+        this.passwordEncoder = passwordEncoder;
     }
 
 
@@ -142,40 +143,14 @@ public class LoginController {
             Authentication authentication = new UsernamePasswordAuthenticationToken(
                     username, null, authorities);
 
-            // Установка аутентификации в контекст
-            // SecurityContextHolder.getContext().setAuthentication(authentication);
-
             // Генерируем новый Access токен
             accessTokenCookieFactory = new AccessTokenCookieFactory(accessTokenDuration);
             Token newAccessToken = accessTokenCookieFactory.apply(authentication);
             String newAccessTokenStr = tokenSerializer.apply(newAccessToken);
 
-            // Генерируем новый Refresh токен
-//            refreshTokenCookieFactory = new RefreshTokenCookieFactory(refreshTokenDuration);
-//            Token newRefreshToken = refreshTokenCookieFactory.apply(authentication);
-//            String newRefreshTokenStr = tokenSerializer.apply(newRefreshToken);
-
-
-            // Удаление неактуальных рефреш токенов и добавление нового в БД проихсодит в классе TokenCookieSessionAuthenticationStrategy
-//            // Сохраняем новый Refresh токен в БД и инвалидируем старый
-//            refreshTokenService.saveToken(
-//                    newRefreshTokenStr,
-//                    authentication.getName(),
-//                    LocalDateTime.ofInstant(newRefreshToken.expiresTime(), ZoneId.systemDefault()),
-//                    false
-//            );
-
-            //refreshTokenService.deleteToken(refreshTokenStr);
-
             // Обновляем куки
             Cookie accessCookie = createHttpOnlySecureCookie(accessTokenCookieName, newAccessTokenStr, (int) ChronoUnit.SECONDS.between(Instant.now(), newAccessToken.expiresTime()));
             response.addCookie(accessCookie);
-
-            //Cookie refreshCookie = createHttpOnlySecureCookie(refreshTokenCookieName, newRefreshTokenStr, (int) ChronoUnit.SECONDS.between(Instant.now().atZone(ZoneId.systemDefault()), newRefreshToken.expiresTime().atZone(ZoneId.systemDefault())));
-            //response.addCookie(refreshCookie);
-
-            // Отдаём Access токен
-            //return ResponseEntity.ok(Map.of("newAccessToken", tokenSerializer.apply(newAccessToken)));
 
             AuthDTO authDTO = new AuthDTO();
             try {
@@ -247,6 +222,33 @@ public class LoginController {
         }
     }
 
+    @PostMapping("/check_password")
+    public ResponseEntity<?> checkPassword(@RequestBody Map<String, String> request, Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Not authenticated");
+        }
+        
+        String password = request.get("password");
+        if (password == null || password.isEmpty()) {
+            return ResponseEntity.badRequest().body("Password required");
+        }
+        
+        try {
+            User user = userService.getUserByUsername(authentication.getName())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+            
+            // Проверка пароля
+            if (passwordEncoder.matches(password, user.getPassword())) {
+                return ResponseEntity.ok().build();
+            } else {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid password");
+            }
+        } catch (Exception e) {
+            logger.error("Ошибка проверки пароля: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error checking password");
+        }
+    }
+
     public void setTokenDeserializer(Function<String, Token> tokenDeserializer) {
         this.tokenDeserializer = tokenDeserializer;
     }
@@ -262,8 +264,4 @@ public class LoginController {
     public void setRefreshTokenCookieFactory(Function<Authentication, Token> refreshTokenCookieFactory) {
         this.refreshTokenCookieFactory = refreshTokenCookieFactory;
     }
-
-
 }
-
-
