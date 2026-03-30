@@ -105,3 +105,17 @@ CREATE TABLE IF NOT EXISTS station_position (
     coord_x INTEGER NOT NULL DEFAULT 0, -- координата X (от 0 до ширины картинки)
     coord_y INTEGER NOT NULL DEFAULT 0 -- координата Y (от 0 до высоты картинки)
 );
+-- Таблица test_documents
+CREATE TABLE IF NOT EXISTS test_documents (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(255),
+    field2 VARCHAR(500),
+    field3 VARCHAR(500),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed BOOLEAN DEFAULT FALSE
+);
+
+-- Индекс для быстрого поиска черновиков пользователя
+CREATE INDEX IF NOT EXISTS idx_test_documents_user_completed ON test_documents(user_id, completed);
