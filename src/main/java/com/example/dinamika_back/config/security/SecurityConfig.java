@@ -22,6 +22,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.ExceptionTranslationFilter;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -75,6 +76,20 @@ public class SecurityConfig {
                 ));
     }
 
+    @Bean
+    public CsrfTokenRepository csrfTokenRepository() {
+        CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+        repository.setCookieName("XSRF-TOKEN");
+        repository.setHeaderName("X-XSRF-TOKEN");
+        return repository;
+    }
+
+    @Bean
+    public GetCsrfTokenFilter getCsrfTokenFilter(CsrfTokenRepository csrfTokenRepository) {
+        GetCsrfTokenFilter filter = new GetCsrfTokenFilter();
+        filter.setCsrfTokenRepository(csrfTokenRepository);
+        return filter;
+    }
 
     @Bean
     public DaoAuthenticationProvider daoAuthenticationProvider() {
@@ -88,14 +103,16 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             TokenCookieAuthenticationConfigurer tokenCookieAuthenticationConfigurer,
-            TokenCookieSessionAuthenticationStrategy tokenCookieSessionAuthenticationStrategy) throws Exception {
+            TokenCookieSessionAuthenticationStrategy tokenCookieSessionAuthenticationStrategy,
+            GetCsrfTokenFilter getCsrfTokenFilter,
+            CsrfTokenRepository csrfTokenRepository) throws Exception {
 
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource())) // Настройка CORS
-            .addFilterAfter(new GetCsrfTokenFilter(), ExceptionTranslationFilter.class)
+            .addFilterAfter(getCsrfTokenFilter, ExceptionTranslationFilter.class)
             .authorizeHttpRequests(authorizeHttpRequests ->
                     authorizeHttpRequests
-                            .requestMatchers("/error", "/api/auth/*", "/logout",  "/api/auth/check_password").permitAll()
+                            .requestMatchers("/error", "/api/auth/*", "/logout", "/api/auth/check_password", "/csrf").permitAll()
                             
                             // ИСПРАВЛЕНО: Конкретные пути для фото
                             .requestMatchers(HttpMethod.GET, "/api/locations/*/photo").permitAll()
@@ -113,68 +130,64 @@ public class SecurityConfig {
                             // Станции
                             .requestMatchers(HttpMethod.POST, "/api/stations").authenticated()
                             
-                            // Карточки животных
+                            // Карточки животных - доступ для ADMIN и OPERATOR
                             .requestMatchers(HttpMethod.POST,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
                             .requestMatchers(HttpMethod.PATCH,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
                             .requestMatchers(HttpMethod.DELETE,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
 
-                            // Документы
+                            // Документы - доступ для ADMIN и OPERATOR
                             .requestMatchers(HttpMethod.POST,"/api/docs/**").hasAnyRole("ADMIN", "OPERATOR")
                             .requestMatchers(HttpMethod.PATCH,"/api/docs/**").hasAnyRole("ADMIN", "OPERATOR")
                             .requestMatchers(HttpMethod.DELETE,"/api/docs/**").hasAnyRole("ADMIN", "OPERATOR")
 
-                            // Информация
+                            // Информация - доступ только для ADMIN
                             .requestMatchers(HttpMethod.POST,"/api/information/**").hasRole("ADMIN")
                             .requestMatchers(HttpMethod.PATCH,"/api/information/**").hasRole("ADMIN")
                             .requestMatchers(HttpMethod.DELETE,"/api/information/**").hasRole("ADMIN")
 
-                            // Уведомления
+                            // Уведомления - доступ для ADMIN и OPERATOR
                             .requestMatchers("/api/notification/**").hasAnyRole("ADMIN", "OPERATOR")
 
-                            // Пользователи
+                            // Пользователи - доступ только для ADMIN
                             .requestMatchers("/api/users/**").hasRole("ADMIN")
                             
-                            // Тестовые документы
-                            .requestMatchers(HttpMethod.POST, "/api/test-documents/**").hasAnyRole("ADMIN", "OPERATOR")
-                            .requestMatchers(HttpMethod.PUT, "/api/test-documents/**").hasAnyRole("ADMIN", "OPERATOR")
-                            .requestMatchers(HttpMethod.GET, "/api/test-documents/**").hasAnyRole("ADMIN", "OPERATOR")
-                            .requestMatchers(HttpMethod.DELETE, "/api/test-documents/**").hasAnyRole("ADMIN", "OPERATOR")
+                            // ТЕСТОВЫЕ ДОКУМЕНТЫ - ДОСТУП ДЛЯ ВСЕХ АВТОРИЗОВАННЫХ ПОЛЬЗОВАТЕЛЕЙ
+                            .requestMatchers(HttpMethod.POST, "/api/test-documents/**").authenticated()
+                            .requestMatchers(HttpMethod.PUT, "/api/test-documents/**").authenticated()
+                            .requestMatchers(HttpMethod.GET, "/api/test-documents/**").authenticated()
+                            .requestMatchers(HttpMethod.DELETE, "/api/test-documents/**").authenticated()
 
                             .anyRequest().authenticated())
             .sessionManagement(sessionManagement -> sessionManagement
                     .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                     .sessionAuthenticationStrategy(tokenCookieSessionAuthenticationStrategy))
-
-            //.csrf(csrf -> csrf.disable());
-            .csrf(csrf -> csrf.csrfTokenRepository(new CookieCsrfTokenRepository())
+            .csrf(csrf -> csrf
+                    .csrfTokenRepository(csrfTokenRepository)
                     .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+                    .ignoringRequestMatchers("/api/auth/login", "/api/auth/refresh_token", "/csrf")
                     .sessionAuthenticationStrategy((authentication, request, response) -> {
                     }));
 
         http.with(tokenCookieAuthenticationConfigurer, Customizer.withDefaults());
 
-
         return http.build();
     }
-
-
 
     // CORS защита
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(Arrays.asList(    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://109.69.22.155:3000",
-    "http://109.69.22.155:8084"));
+        configuration.setAllowedOrigins(Arrays.asList("http://localhost:3000",
+                "http://127.0.0.1:3000",
+                "http://109.69.22.155:3000",
+                "http://109.69.22.155:8084"));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-XSRF-TOKEN", "XSRF-TOKEN", "JSESSIONID", accessTokenCookieName, refreshTokenCookieName));
-        configuration.setAllowCredentials(true); // Разрешить cookies
+        configuration.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
     }
-
 
     @Bean
     public TokenCookieSessionAuthenticationStrategy tokenCookieSessionAuthenticationStrategy(TokenCookieJweStringSerializer tokenCookieJweStringSerializer) {
@@ -183,12 +196,10 @@ public class SecurityConfig {
         return tokenCookieStrategy;
     }
 
-    //
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration) throws Exception {
         return authenticationConfiguration.getAuthenticationManager();
     }
-
 
     @Bean
     public UserDetailsService userDetailsService() {
@@ -199,5 +210,4 @@ public class SecurityConfig {
     public BCryptPasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
-
 }
