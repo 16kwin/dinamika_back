@@ -133,6 +133,12 @@ public class SecurityConfig {
 
                             // Пользователи
                             .requestMatchers("/api/users/**").hasRole("ADMIN")
+                            
+                            // Тестовые документы
+                            .requestMatchers(HttpMethod.POST, "/api/test-documents/**").hasAnyRole("ADMIN", "OPERATOR")
+                            .requestMatchers(HttpMethod.PUT, "/api/test-documents/**").hasAnyRole("ADMIN", "OPERATOR")
+                            .requestMatchers(HttpMethod.GET, "/api/test-documents/**").hasAnyRole("ADMIN", "OPERATOR")
+                            .requestMatchers(HttpMethod.DELETE, "/api/test-documents/**").hasAnyRole("ADMIN", "OPERATOR")
 
                             .anyRequest().authenticated())
             .sessionManagement(sessionManagement -> sessionManagement
@@ -193,7 +199,5 @@ public class SecurityConfig {
     public BCryptPasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
-
-
 
 }
