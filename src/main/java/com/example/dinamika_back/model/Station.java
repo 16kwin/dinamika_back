@@ -1,92 +1,92 @@
 package com.example.dinamika_back.model;
 
+import com.example.dinamika_back.listener.StationEntityListener;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.LocalDateTime;
+
 @Entity
-@Table(name = "station")
+@Table(name = "stations")
 @Getter
 @Setter
 @NoArgsConstructor
+@EntityListeners(StationEntityListener.class)
 public class Station {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "uid")
-    private Integer uid;
+    private Long id;
 
-    @Column(name = "station_name", nullable = false)
-    private String stationName;
+    @Column(name = "uid", unique = true, nullable = false, length = 50)
+    private String uid;
 
-    @ManyToOne
-    @JoinColumn(name = "station_model_id", nullable = false)
-    private StationModel stationModel;
+    @Column(name = "name", nullable = false, length = 255)
+    private String name;
 
-    @Column(name = "serial_number")
-    private Integer serialNumberOfTheStation;
+    @Column(name = "workshop", length = 100)
+    private String workshop;
 
-    @Column(name = "current_capacity")
-    private Integer currentCapacityOfTheStation;
+    @Column(name = "section", length = 100)
+    private String section;
 
-    @Column(name = "ip_address")
-    private String ipAddress;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
+    private StationStatus status;
 
-    // Новые поля
-    @Column(name = "is_enabled", nullable = false)
-    private Boolean isEnabled = true;
+    @Column(name = "total_cells", nullable = false)
+    private Integer totalCells;
 
-    @Column(name = "capacity")
-    private Integer capacity;
+    @Column(name = "filled_cells", nullable = false)
+    private Integer filledCells;
 
-    @Column(name = "fullness")
-    private Integer fullness = 0;
+    @Column(name = "template_nomenclature_count", nullable = false)
+    private Integer templateNomenclatureCount;
 
-    @Column(name = "has_errors", nullable = false)
-    private Boolean hasErrors = false;
+    @Column(name = "remaining_nomenclature_count", nullable = false)
+    private Integer remainingNomenclatureCount;
 
-    @Column(name = "issued")
-    private Integer issued = 0;
+    @Column(name = "max_ready_parts", nullable = false)
+    private Integer maxReadyParts;
 
-    @Column(name = "issued_over_norm")
-    private Integer issuedOverNorm = 0;
+    @Column(name = "ready_parts_count", nullable = false)
+    private Integer readyPartsCount;
 
-    @Column(name = "finished_parts")
-    private Integer finishedParts = 0;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "station_type", nullable = false)
+    private StationType stationType;
 
-    @ManyToOne
-    @JoinColumn(name = "level_1_factory_id")
-    private Location level1Factory;
+    @Column(name = "parent_uid", length = 50)
+    private String parentUid;
 
-    @ManyToOne
-    @JoinColumn(name = "level_2_object_id")
-    private Location level2Object;
+    @Column(name = "has_error", nullable = false)
+    private Boolean hasError;
 
-    @ManyToOne
-    @JoinColumn(name = "level_3_zone_id")
-    private Location level3Zone;
+    @Column(name = "is_tmc", nullable = false)
+    private Boolean isTmc;
 
-    public Station(String stationName, StationModel stationModel, Integer serialNumberOfTheStation, 
-                   Integer currentCapacityOfTheStation, String ipAddress, 
-                   Boolean isEnabled, Integer capacity, Integer fullness, 
-                   Boolean hasErrors, Integer issued, Integer issuedOverNorm, 
-                   Integer finishedParts, Location level1Factory, 
-                   Location level2Object, Location level3Zone) {
-        this.stationName = stationName;
-        this.stationModel = stationModel;
-        this.serialNumberOfTheStation = serialNumberOfTheStation;
-        this.currentCapacityOfTheStation = currentCapacityOfTheStation;
-        this.ipAddress = ipAddress;
-        this.isEnabled = isEnabled;
-        this.capacity = capacity;
-        this.fullness = fullness;
-        this.hasErrors = hasErrors;
-        this.issued = issued;
-        this.issuedOverNorm = issuedOverNorm;
-        this.finishedParts = finishedParts;
-        this.level1Factory = level1Factory;
-        this.level2Object = level2Object;
-        this.level3Zone = level3Zone;
+    @Column(name = "is_sgd", nullable = false)
+    private Boolean isSgd;
+
+    @Column(name = "is_ok", nullable = false)
+    private Boolean isOk;
+
+    @Column(name = "created_at", updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+    
+    @PrePersist
+    protected void onCreate() {
+        createdAt = LocalDateTime.now();
+        updatedAt = LocalDateTime.now();
+    }
+    
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = LocalDateTime.now();
     }
 }

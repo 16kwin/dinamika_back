@@ -39,16 +39,11 @@ public class SecurityConfig {
 
     private AuthService authService;
 
-    // Имена куков и длительность
     private @Value("${jwt.access-token-name}") String accessTokenCookieName;
     private @Value("${jwt.refresh-token-name}") String refreshTokenCookieName;
-
     private @Value("${jwt.access-token-expiration-minutes}") String accessTokenDuration;
     private @Value("${jwt.refresh-token-expiration-minutes}") String refreshTokenDuration;
-
-    // Фронтенд
     private @Value("${ip_address}") String ip_address;
-
 
     @Autowired
     public void setUserService(AuthService authService) {
@@ -108,55 +103,39 @@ public class SecurityConfig {
             CsrfTokenRepository csrfTokenRepository) throws Exception {
 
         http
-            .cors(cors -> cors.configurationSource(corsConfigurationSource())) // Настройка CORS
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .addFilterAfter(getCsrfTokenFilter, ExceptionTranslationFilter.class)
             .authorizeHttpRequests(authorizeHttpRequests ->
                     authorizeHttpRequests
                             .requestMatchers("/error", "/api/auth/*", "/logout", "/api/auth/check_password", "/csrf").permitAll()
-                            
-                            // ИСПРАВЛЕНО: Конкретные пути для фото
                             .requestMatchers(HttpMethod.GET, "/api/locations/*/photo").permitAll()
                             .requestMatchers(HttpMethod.POST, "/api/locations/*/photo").authenticated()
                             .requestMatchers(HttpMethod.DELETE, "/api/locations/*/photo").authenticated()
-                            
-                            // Доступ к файлам
                             .requestMatchers("/uploads/**").permitAll()
-                            
-                            // Существующие location эндпоинты (без фото)
                             .requestMatchers(HttpMethod.GET, "/api/locations/hierarchy").permitAll()
                             .requestMatchers(HttpMethod.GET, "/api/locations/hierarchy/first").permitAll()
                             .requestMatchers(HttpMethod.POST, "/api/locations").authenticated()
-                            
-                            // Станции
-                            .requestMatchers(HttpMethod.POST, "/api/stations").authenticated()
-                            
-                            // Карточки животных - доступ для ADMIN и OPERATOR
+                            .requestMatchers(HttpMethod.GET, "/api/stations/static").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/stations/static/**").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/stations/dynamic").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/stations/dynamic/**").permitAll()
+                            .requestMatchers(HttpMethod.POST, "/api/stations").permitAll()
+                            .requestMatchers("/ws-stations/**").permitAll()
                             .requestMatchers(HttpMethod.POST,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
                             .requestMatchers(HttpMethod.PATCH,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
                             .requestMatchers(HttpMethod.DELETE,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
-
-                            // Документы - доступ для ADMIN и OPERATOR
                             .requestMatchers(HttpMethod.POST,"/api/docs/**").hasAnyRole("ADMIN", "OPERATOR")
                             .requestMatchers(HttpMethod.PATCH,"/api/docs/**").hasAnyRole("ADMIN", "OPERATOR")
                             .requestMatchers(HttpMethod.DELETE,"/api/docs/**").hasAnyRole("ADMIN", "OPERATOR")
-
-                            // Информация - доступ только для ADMIN
                             .requestMatchers(HttpMethod.POST,"/api/information/**").hasRole("ADMIN")
                             .requestMatchers(HttpMethod.PATCH,"/api/information/**").hasRole("ADMIN")
                             .requestMatchers(HttpMethod.DELETE,"/api/information/**").hasRole("ADMIN")
-
-                            // Уведомления - доступ для ADMIN и OPERATOR
                             .requestMatchers("/api/notification/**").hasAnyRole("ADMIN", "OPERATOR")
-
-                            // Пользователи - доступ только для ADMIN
                             .requestMatchers("/api/users/**").hasRole("ADMIN")
-                            
-                            // ТЕСТОВЫЕ ДОКУМЕНТЫ - ДОСТУП ДЛЯ ВСЕХ АВТОРИЗОВАННЫХ ПОЛЬЗОВАТЕЛЕЙ
                             .requestMatchers(HttpMethod.POST, "/api/test-documents/**").authenticated()
                             .requestMatchers(HttpMethod.PUT, "/api/test-documents/**").authenticated()
                             .requestMatchers(HttpMethod.GET, "/api/test-documents/**").authenticated()
                             .requestMatchers(HttpMethod.DELETE, "/api/test-documents/**").authenticated()
-
                             .anyRequest().authenticated())
             .sessionManagement(sessionManagement -> sessionManagement
                     .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
@@ -164,7 +143,7 @@ public class SecurityConfig {
             .csrf(csrf -> csrf
                     .csrfTokenRepository(csrfTokenRepository)
                     .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                    .ignoringRequestMatchers("/api/auth/login", "/api/auth/refresh_token", "/csrf")
+                    .ignoringRequestMatchers("/api/auth/login", "/api/auth/refresh_token", "/csrf", "/ws-stations/**")
                     .sessionAuthenticationStrategy((authentication, request, response) -> {
                     }));
 
@@ -173,14 +152,16 @@ public class SecurityConfig {
         return http.build();
     }
 
-    // CORS защита
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(Arrays.asList("http://localhost:3000",
+        // ПРАВИЛЬНАЯ КОНФИГУРАЦИЯ - без звездочки, конкретные origins
+        configuration.setAllowedOrigins(Arrays.asList(
+                "http://localhost:3000",
                 "http://127.0.0.1:3000",
                 "http://109.69.22.155:3000",
-                "http://109.69.22.155:8084"));
+                "http://109.69.22.155:8084"
+        ));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-XSRF-TOKEN", "XSRF-TOKEN", "JSESSIONID", accessTokenCookieName, refreshTokenCookieName));
         configuration.setAllowCredentials(true);
