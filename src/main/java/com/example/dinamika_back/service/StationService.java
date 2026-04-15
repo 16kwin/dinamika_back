@@ -58,23 +58,36 @@ public class StationService {
     }
     
     private StationDynamicDto convertToDynamicDto(Station station) {
-        double filledCellsPercent = station.getTotalCells() > 0 
-                ? (station.getFilledCells() * 100.0) / station.getTotalCells() 
+        int totalCells = station.getTotalCells() != null ? station.getTotalCells() : 0;
+        int filledCells = station.getFilledCells() != null ? station.getFilledCells() : 0;
+        int templateNomenclatureCount = station.getTemplateNomenclatureCount() != null ? station.getTemplateNomenclatureCount() : 0;
+        int remainingNomenclatureCount = station.getRemainingNomenclatureCount() != null ? station.getRemainingNomenclatureCount() : 0;
+        int maxReadyParts = station.getMaxReadyParts() != null ? station.getMaxReadyParts() : 0;
+        int readyPartsCount = station.getReadyPartsCount() != null ? station.getReadyPartsCount() : 0;
+        
+        double filledCellsPercent = totalCells > 0 
+                ? (filledCells * 100.0) / totalCells 
                 : 0.0;
         
-        double remainingNomenclaturePercent = station.getTemplateNomenclatureCount() > 0 
-                ? (station.getRemainingNomenclatureCount() * 100.0) / station.getTemplateNomenclatureCount() 
+        double remainingNomenclaturePercent = templateNomenclatureCount > 0 
+                ? (remainingNomenclatureCount * 100.0) / templateNomenclatureCount 
                 : 0.0;
         
-        double readyPartsPercent = station.getMaxReadyParts() > 0 
-                ? (station.getReadyPartsCount() * 100.0) / station.getMaxReadyParts() 
+        double readyPartsPercent = maxReadyParts > 0 
+                ? (readyPartsCount * 100.0) / maxReadyParts 
                 : 0.0;
         
         return new StationDynamicDto(
                 station.getUid(),
                 filledCellsPercent,
                 remainingNomenclaturePercent,
-                readyPartsPercent
+                readyPartsPercent,
+                totalCells,
+                filledCells,
+                templateNomenclatureCount,
+                remainingNomenclatureCount,
+                maxReadyParts,
+                readyPartsCount
         );
     }
 }

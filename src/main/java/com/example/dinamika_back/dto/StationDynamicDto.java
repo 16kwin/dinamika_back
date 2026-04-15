@@ -15,4 +15,12 @@ public class StationDynamicDto {
     private Double filledCellsPercent;
     private Double remainingNomenclaturePercent;
     private Double readyPartsPercent;
+    
+    // Исходные данные для вычислений
+    private Integer totalCells;
+    private Integer filledCells;
+    private Integer templateNomenclatureCount;
+    private Integer remainingNomenclatureCount;
+    private Integer maxReadyParts;
+    private Integer readyPartsCount;
 }
