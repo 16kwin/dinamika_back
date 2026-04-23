@@ -1,3 +1,4 @@
+// RefreshTokenService.java - полный код
 package com.example.dinamika_back.service;
 
 import org.slf4j.Logger;
@@ -53,10 +54,11 @@ public class RefreshTokenService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void deleteTokensByUser(String username) {
         Optional<User> user = userService.getUserByUsername(username);
-        if (!user.isPresent()) {
+        if (user.isPresent()) {
+            refreshTokenRepository.deleteByUserId(user.get().getId());
+        } else {
             logger.error("При попытке удалить рефреш токены в БД пользователь с ником {} не найден", username);
         }
-        refreshTokenRepository.deleteByUserId(user.get().getId());
     }
 
 }

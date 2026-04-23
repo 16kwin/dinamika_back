@@ -11,6 +11,7 @@ import org.springframework.web.multipart.MultipartFile;
 import com.example.dinamika_back.model.Role;
 import com.example.dinamika_back.model.User;
 import com.example.dinamika_back.repository.RoleRepository;
+import com.example.dinamika_back.repository.UserRepository;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;

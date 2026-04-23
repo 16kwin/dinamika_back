@@ -15,6 +15,9 @@ public class StationStaticDto {
     private String name;
     private String workshop;
     private String section;
+    private Long enterpriseId;
+    private Long workshopId;
+    private Long sectionId;
     private String status;
     private String stationType;
     private String parentUid;

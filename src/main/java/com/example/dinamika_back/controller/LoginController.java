@@ -1,3 +1,4 @@
+// LoginController.java - полный код с добавленным /logout
 package com.example.dinamika_back.controller;
 
 import com.nimbusds.jose.KeyLengthException;
@@ -175,6 +176,41 @@ public class LoginController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ex.getMessage());
         }
 
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<?> logout(HttpServletRequest request, HttpServletResponse response, Authentication authentication) {
+        try {
+            // Удаляем refresh токены из БД если пользователь авторизован
+            if (authentication != null && authentication.isAuthenticated()) {
+                String username = authentication.getName();
+                refreshTokenService.deleteTokensByUser(username);
+            }
+            
+            // Удаляем куки access токена
+            Cookie accessCookie = new Cookie(accessTokenCookieName, null);
+            accessCookie.setHttpOnly(true);
+            accessCookie.setSecure(false);
+            accessCookie.setPath("/");
+            accessCookie.setMaxAge(0);
+            response.addCookie(accessCookie);
+            
+            // Удаляем куки refresh токена
+            Cookie refreshCookie = new Cookie(refreshTokenCookieName, null);
+            refreshCookie.setHttpOnly(true);
+            refreshCookie.setSecure(false);
+            refreshCookie.setPath("/");
+            refreshCookie.setMaxAge(0);
+            response.addCookie(refreshCookie);
+            
+            // Очищаем контекст безопасности
+            SecurityContextHolder.clearContext();
+            
+            return ResponseEntity.ok("Logged out successfully");
+        } catch (Exception e) {
+            logger.error("Ошибка при выходе из системы: {}", e.getMessage());
+            return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
     private Optional<String> extractCookie(HttpServletRequest request, String name) {

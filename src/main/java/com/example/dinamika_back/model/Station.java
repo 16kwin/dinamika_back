@@ -26,11 +26,17 @@ public class Station {
     @Column(name = "name", nullable = false, length = 255)
     private String name;
 
-    @Column(name = "workshop", length = 100)
-    private String workshop;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "enterprise_id")
+    private Enterprise enterprise;
 
-    @Column(name = "section", length = 100)
-    private String section;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "workshop_id")
+    private Workshop workshop;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "section_id")
+    private Section section;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)

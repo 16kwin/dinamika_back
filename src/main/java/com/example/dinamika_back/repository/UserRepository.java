@@ -1,4 +1,4 @@
-package com.example.dinamika_back.service;
+package com.example.dinamika_back.repository;
 
 import com.example.dinamika_back.model.User;
 import org.springframework.data.jpa.repository.JpaRepository;

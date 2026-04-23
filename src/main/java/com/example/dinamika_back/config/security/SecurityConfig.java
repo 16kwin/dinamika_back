@@ -7,7 +7,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -16,11 +15,9 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.ExceptionTranslationFilter;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
@@ -29,7 +26,6 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import com.example.dinamika_back.service.AuthService;
 import com.example.dinamika_back.service.RefreshTokenService;
-import com.example.dinamika_back.service.UserService;
 
 import java.util.Arrays;
 
@@ -108,12 +104,14 @@ public class SecurityConfig {
             .authorizeHttpRequests(authorizeHttpRequests ->
                     authorizeHttpRequests
                             .requestMatchers("/error", "/api/auth/*", "/logout", "/api/auth/check_password", "/csrf").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/locations/hierarchy").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/locations/hierarchy/first").permitAll()
+                            .requestMatchers(HttpMethod.POST, "/api/stations/static/filtered").permitAll()
+.requestMatchers(HttpMethod.POST, "/api/stations/dynamic/filtered").permitAll()
                             .requestMatchers(HttpMethod.GET, "/api/locations/*/photo").permitAll()
                             .requestMatchers(HttpMethod.POST, "/api/locations/*/photo").authenticated()
                             .requestMatchers(HttpMethod.DELETE, "/api/locations/*/photo").authenticated()
                             .requestMatchers("/uploads/**").permitAll()
-                            .requestMatchers(HttpMethod.GET, "/api/locations/hierarchy").permitAll()
-                            .requestMatchers(HttpMethod.GET, "/api/locations/hierarchy/first").permitAll()
                             .requestMatchers(HttpMethod.POST, "/api/locations").authenticated()
                             .requestMatchers(HttpMethod.GET, "/api/stations/static").permitAll()
                             .requestMatchers(HttpMethod.GET, "/api/stations/static/**").permitAll()
@@ -121,6 +119,9 @@ public class SecurityConfig {
                             .requestMatchers(HttpMethod.GET, "/api/stations/dynamic/**").permitAll()
                             .requestMatchers(HttpMethod.POST, "/api/stations").permitAll()
                             .requestMatchers("/ws-stations/**").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/user/filters").authenticated()
+                            .requestMatchers(HttpMethod.POST, "/api/user/filters").authenticated()
+                            .requestMatchers(HttpMethod.DELETE, "/api/user/filters").authenticated()
                             .requestMatchers(HttpMethod.POST,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
                             .requestMatchers(HttpMethod.PATCH,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
                             .requestMatchers(HttpMethod.DELETE,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
@@ -155,7 +156,6 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // ПРАВИЛЬНАЯ КОНФИГУРАЦИЯ - без звездочки, конкретные origins
         configuration.setAllowedOrigins(Arrays.asList(
                 "http://localhost:3000",
                 "http://127.0.0.1:3000",
@@ -180,11 +180,6 @@ public class SecurityConfig {
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration) throws Exception {
         return authenticationConfiguration.getAuthenticationManager();
-    }
-
-    @Bean
-    public UserDetailsService userDetailsService() {
-        return new AuthService();
     }
 
     @Bean
