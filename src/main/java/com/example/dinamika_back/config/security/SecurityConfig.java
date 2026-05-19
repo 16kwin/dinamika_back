@@ -107,7 +107,7 @@ public class SecurityConfig {
                             .requestMatchers(HttpMethod.GET, "/api/locations/hierarchy").permitAll()
                             .requestMatchers(HttpMethod.GET, "/api/locations/hierarchy/first").permitAll()
                             .requestMatchers(HttpMethod.POST, "/api/stations/static/filtered").permitAll()
-.requestMatchers(HttpMethod.POST, "/api/stations/dynamic/filtered").permitAll()
+                            .requestMatchers(HttpMethod.POST, "/api/stations/dynamic/filtered").permitAll()
                             .requestMatchers(HttpMethod.GET, "/api/locations/*/photo").permitAll()
                             .requestMatchers(HttpMethod.POST, "/api/locations/*/photo").authenticated()
                             .requestMatchers(HttpMethod.DELETE, "/api/locations/*/photo").authenticated()
@@ -137,6 +137,7 @@ public class SecurityConfig {
                             .requestMatchers(HttpMethod.PUT, "/api/test-documents/**").authenticated()
                             .requestMatchers(HttpMethod.GET, "/api/test-documents/**").authenticated()
                             .requestMatchers(HttpMethod.DELETE, "/api/test-documents/**").authenticated()
+                            .requestMatchers(HttpMethod.POST, "/api/sync/**").permitAll()
                             .anyRequest().authenticated())
             .sessionManagement(sessionManagement -> sessionManagement
                     .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
@@ -144,7 +145,7 @@ public class SecurityConfig {
             .csrf(csrf -> csrf
                     .csrfTokenRepository(csrfTokenRepository)
                     .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                    .ignoringRequestMatchers("/api/auth/login", "/api/auth/refresh_token", "/csrf", "/ws-stations/**")
+                    .ignoringRequestMatchers("/api/auth/login", "/api/auth/refresh_token", "/csrf", "/ws-stations/**", "/api/sync/**")
                     .sessionAuthenticationStrategy((authentication, request, response) -> {
                     }));
 

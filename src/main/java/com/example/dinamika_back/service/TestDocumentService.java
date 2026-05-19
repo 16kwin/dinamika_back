@@ -1,4 +1,3 @@
-// TestDocumentService.java
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.model.TestDocument;
@@ -14,11 +13,26 @@ import java.util.List;
 public class TestDocumentService {
 
     private final TestDocumentRepository testDocumentRepository;
+    private final SyncService syncService;
 
     @Transactional
     public TestDocument create(TestDocument document) {
         document.setId(null);
         document.setCompleted(false);
+        TestDocument saved = testDocumentRepository.save(document);
+        
+        // Отправляем во вторую базу
+        syncService.sendToSecondDatabase(saved);
+        
+        return saved;
+    }
+
+    @Transactional
+    public TestDocument createWithoutSync(TestDocument document) {
+        document.setId(null);
+        if (document.getCompleted() == null) {
+            document.setCompleted(false);
+        }
         return testDocumentRepository.save(document);
     }
 
@@ -40,7 +54,12 @@ public class TestDocumentService {
             existing.setCompleted(document.getCompleted());
         }
         
-        return testDocumentRepository.save(existing);
+        TestDocument updated = testDocumentRepository.save(existing);
+        
+        // Отправляем во вторую базу
+        syncService.sendToSecondDatabase(updated);
+        
+        return updated;
     }
 
     public TestDocument findById(Long id) {
