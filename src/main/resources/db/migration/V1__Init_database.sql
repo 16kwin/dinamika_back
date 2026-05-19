@@ -128,7 +128,7 @@ WHERE NOT EXISTS (SELECT 1 FROM roles WHERE name = 'OPERATOR');
 -- Вставка пользователя admin
 INSERT INTO users (username, password, first_name, middle_name, last_name, role_id)
 SELECT 'admin', 
-       '$2a$12$JHJRYuHX7/rkte1QhaBLr.vpk1d7uLZKv008VfxdEsrt8wAouCev.',
+       '$2a$12$hvxdYaWoqRZgdecAxRWhAewd6TNL8Bw.ECKM79B4wPudPLI8Afspa',
        'Admin',
        'Adminovich',
        'Administrator',
