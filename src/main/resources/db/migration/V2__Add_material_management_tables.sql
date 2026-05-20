@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS public.reg_group_material
 (
     uid uuid NOT NULL,
     group_name text COLLATE pg_catalog."default" NOT NULL,
-    parent_group integer,
+    parent_group uuid,
     CONSTRAINT reg_group_material_pkey PRIMARY KEY (uid)
 );
 
@@ -160,7 +160,7 @@ COMMENT ON TABLE public.spr_manufacturer
 CREATE TABLE IF NOT EXISTS public.spr_material
 (
     uid uuid NOT NULL DEFAULT gen_random_uuid(),
-    "guid_1C" bit varying(128)[],
+    guid_1c bit varying(128)[],
     uid_other_sys bit varying(128)[],
     uid_store bit varying(128)[],
     url_image uuid,
@@ -199,7 +199,7 @@ COMMENT ON TABLE public.spr_material
 COMMENT ON COLUMN public.spr_material.uid
     IS 'Уникальный идентификатор объекта номенклатуры';
 
-COMMENT ON COLUMN public.spr_material."guid_1C"
+COMMENT ON COLUMN public.spr_material.guid_1c
     IS 'GUID в 1С';
 
 COMMENT ON COLUMN public.spr_material.uid_other_sys

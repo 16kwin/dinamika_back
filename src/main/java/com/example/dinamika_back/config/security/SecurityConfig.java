@@ -138,6 +138,7 @@ public class SecurityConfig {
                             .requestMatchers(HttpMethod.GET, "/api/test-documents/**").authenticated()
                             .requestMatchers(HttpMethod.DELETE, "/api/test-documents/**").authenticated()
                             .requestMatchers(HttpMethod.POST, "/api/sync/**").permitAll()
+                            .requestMatchers("/api/nomenclature/**").permitAll()
                             .anyRequest().authenticated())
             .sessionManagement(sessionManagement -> sessionManagement
                     .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
@@ -145,7 +146,7 @@ public class SecurityConfig {
             .csrf(csrf -> csrf
                     .csrfTokenRepository(csrfTokenRepository)
                     .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                    .ignoringRequestMatchers("/api/auth/login", "/api/auth/refresh_token", "/csrf", "/ws-stations/**", "/api/sync/**")
+                    .ignoringRequestMatchers("/api/auth/login", "/api/auth/refresh_token", "/csrf", "/ws-stations/**", "/api/sync/**", "/api/nomenclature/**")
                     .sessionAuthenticationStrategy((authentication, request, response) -> {
                     }));
 
