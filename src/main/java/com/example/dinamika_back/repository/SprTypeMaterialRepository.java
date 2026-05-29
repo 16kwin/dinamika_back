@@ -6,7 +6,8 @@ import org.springframework.stereotype.Repository;
 
 import java.util.UUID;
 
-/** Репозиторий для работы со справочником видов хранимых материалов */
+/** Репозиторий для справочника "Группы учета" (ТМЦ, Готовые детали и т.д.) */
 @Repository
 public interface SprTypeMaterialRepository extends JpaRepository<SprTypeMaterial, UUID> {
+    // JpaRepository уже даёт findAll(), findById() и т.д.
 }

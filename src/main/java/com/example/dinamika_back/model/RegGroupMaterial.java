@@ -7,10 +7,6 @@ import lombok.Setter;
 
 import java.util.UUID;
 
-/**
- * Регистр "Группы материалов".
- * Иерархическая структура групп для классификации номенклатуры.
- */
 @Entity
 @Table(name = "reg_group_material")
 @Getter
@@ -22,11 +18,12 @@ public class RegGroupMaterial {
     @Column(name = "uid", nullable = false)
     private UUID uid;
 
-    /** Наименование группы */
     @Column(name = "group_name", nullable = false)
     private String groupName;
 
-    /** Идентификатор родительской группы (UUID) */
     @Column(name = "parent_group")
     private UUID parentGroup;
+
+    @Column(name = "group_code")
+    private Integer groupCode;
 }

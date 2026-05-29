@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS public.reg_group_material
     uid uuid NOT NULL,
     group_name text COLLATE pg_catalog."default" NOT NULL,
     parent_group uuid,
+    group_code integer,
     CONSTRAINT reg_group_material_pkey PRIMARY KEY (uid)
 );
 
@@ -103,6 +104,9 @@ COMMENT ON TABLE public.reg_group_material
 
 COMMENT ON COLUMN public.reg_group_material.parent_group
     IS 'Родительская группа';
+
+COMMENT ON COLUMN public.reg_group_material.group_code
+    IS 'Код группы (5 знаков)';
 
 CREATE TABLE IF NOT EXISTS public.reg_price
 (
@@ -360,6 +364,11 @@ CREATE TABLE IF NOT EXISTS public.spr_type_purpose
 
 COMMENT ON TABLE public.spr_type_purpose
     IS 'Справочник Типы назначения материалов: Металлообрабатывающий инструмент, Механический инструмент, Оснастка, СИЗ, Расходные материалы и др.';
+
+-- Создаём корневую группу "Номенклатура" с кодом 00000
+INSERT INTO public.reg_group_material (uid, group_name, parent_group, group_code)
+SELECT gen_random_uuid(), 'Номенклатура', NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.reg_group_material WHERE group_code = 0);
 
 ALTER TABLE IF EXISTS public.doc_entrance
     ADD CONSTRAINT doc_entrance_supplier_fkey FOREIGN KEY (supplier)

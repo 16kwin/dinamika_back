@@ -125,10 +125,10 @@ INSERT INTO roles (name, description)
 SELECT 'OPERATOR', 'Оператор'
 WHERE NOT EXISTS (SELECT 1 FROM roles WHERE name = 'OPERATOR');
 
--- Вставка пользователя admin
+-- Вставка пользователя admin с НОВЫМ ЗАШИФРОВАННЫМ паролем
 INSERT INTO users (username, password, first_name, middle_name, last_name, role_id)
 SELECT 'admin', 
-       '$2a$12$hvxdYaWoqRZgdecAxRWhAewd6TNL8Bw.ECKM79B4wPudPLI8Afspa',
+       '$2y$12$DuBHFqPN/liLWOOpazYz7eStzx9bIaUFQCQP1W52Vxy3JI5BxTEua',
        'Admin',
        'Adminovich',
        'Administrator',

@@ -1,4 +1,4 @@
-// dto/GroupMaterialTreeDTO.java
+// dto/GroupMaterialTreeDTO.java (обновлённый)
 package com.example.dinamika_back.dto;
 
 import lombok.AllArgsConstructor;
@@ -15,6 +15,7 @@ import java.util.UUID;
 public class GroupMaterialTreeDTO {
     private UUID uid;
     private String name;
+    private Integer code;
     private List<GroupMaterialTreeDTO> children = new ArrayList<>();
     private List<MaterialItemDTO> materials = new ArrayList<>();
 }

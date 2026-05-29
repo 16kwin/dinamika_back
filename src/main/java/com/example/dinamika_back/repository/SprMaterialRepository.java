@@ -2,6 +2,7 @@ package com.example.dinamika_back.repository;
 
 import com.example.dinamika_back.model.SprMaterial;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -29,5 +30,11 @@ public interface SprMaterialRepository extends JpaRepository<SprMaterial, UUID> 
     
     /** Найти все материалы бренда */
     List<SprMaterial> findByBrandUid(UUID brandUid);
-    boolean existsByCodeMaterial(Integer code);
+    
+    /** Проверка существования материала по коду */
+    boolean existsByCodeMaterial(Integer codeMaterial);
+    
+    /** Получение максимального кода номенклатуры */
+    @Query("SELECT COALESCE(MAX(m.codeMaterial), 0) FROM SprMaterial m")
+    Integer findMaxCodeMaterial();
 }

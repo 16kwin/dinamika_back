@@ -13,8 +13,13 @@ public class MaterialItemDTO {
     private UUID uid;
     private String name;
     private String article;
+    private Integer code;
     private String unit;
     private Integer quantity;
     private Double price;
-    private Integer code; // добавить код номенклатуры
+    
+    // Новые поля для отображения в таблице справочника
+    private String typeMainName;
+    private String typePurposeName;
+    private String typeProductName;
 }
