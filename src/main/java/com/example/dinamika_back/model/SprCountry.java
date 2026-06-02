@@ -4,13 +4,8 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-
 import java.util.UUID;
 
-/**
- * Справочник "Страны".
- * Содержит перечень стран происхождения товаров.
- */
 @Entity
 @Table(name = "spr_country")
 @Getter
@@ -22,7 +17,6 @@ public class SprCountry {
     @Column(name = "uid", nullable = false)
     private UUID uid;
 
-    /** Наименование страны */
     @Column(name = "name", nullable = false)
     private String name;
 }

@@ -4,13 +4,9 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-
+import java.time.LocalDateTime;
 import java.util.UUID;
 
-/**
- * Документ "Поступление материалов" (приходная накладная, УПД).
- * Фиксирует факт поступления ТМЦ от поставщика с указанием цены.
- */
 @Entity
 @Table(name = "doc_entrance")
 @Getter
@@ -22,11 +18,12 @@ public class DocEntrance {
     @Column(name = "uid", nullable = false)
     private UUID uid;
 
-    /** Цена поступления */
     @Column(name = "price", nullable = false)
     private Double price;
 
-    /** Поставщик, от которого поступил материал */
+    @Column(name = "entrance_date")
+    private LocalDateTime entranceDate;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "supplier")
     private SprSupplier supplier;

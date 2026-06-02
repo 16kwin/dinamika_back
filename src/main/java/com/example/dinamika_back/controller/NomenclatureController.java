@@ -5,7 +5,9 @@ import com.example.dinamika_back.service.NomenclatureService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.UUID;
 
@@ -29,13 +31,6 @@ public class NomenclatureController {
     public ResponseEntity<Void> saveDraft(@RequestBody NomenclatureSaveRequest request) {
         nomenclatureService.saveDraft(request);
         return ResponseEntity.ok().build();
-    }
-
-    // ==================== Получение одного материала ====================
-
-    @GetMapping("/{uid}")
-    public ResponseEntity<SprMaterialDTO> getMaterial(@PathVariable UUID uid) {
-        return ResponseEntity.ok(nomenclatureService.getMaterial(uid));
     }
 
     // ==================== Дерево каталога ====================
@@ -87,7 +82,6 @@ public class NomenclatureController {
 
     // ==================== Группы номенклатуры ====================
 
-    /** Все группы номенклатуры (для справочника) */
     @GetMapping("/type-purposes")
     public ResponseEntity<List<SprTypePurposeDTO>> getTypePurposes(
             @RequestParam(required = false) UUID typeMaterialUid) {
@@ -97,13 +91,11 @@ public class NomenclatureController {
         return ResponseEntity.ok(nomenclatureService.getAllTypePurposes());
     }
 
-    /** Создать группу номенклатуры */
     @PostMapping("/type-purposes")
     public ResponseEntity<SprTypePurposeDTO> createTypePurpose(@RequestBody CreateTypePurposeRequest request) {
         return ResponseEntity.ok(nomenclatureService.createTypePurpose(request));
     }
 
-    /** Обновить группу номенклатуры */
     @PatchMapping("/type-purposes/{uid}")
     public ResponseEntity<SprTypePurposeDTO> updateTypePurpose(
             @PathVariable UUID uid,
@@ -111,7 +103,6 @@ public class NomenclatureController {
         return ResponseEntity.ok(nomenclatureService.updateTypePurpose(uid, request));
     }
 
-    /** Удалить группу номенклатуры */
     @DeleteMapping("/type-purposes/{uid}")
     public ResponseEntity<Void> deleteTypePurpose(@PathVariable UUID uid) {
         nomenclatureService.deleteTypePurpose(uid);
@@ -120,7 +111,6 @@ public class NomenclatureController {
 
     // ==================== Виды номенклатуры ====================
 
-    /** Все виды номенклатуры (для справочника) */
     @GetMapping("/type-products")
     public ResponseEntity<List<SprTypeProductDTO>> getTypeProducts(
             @RequestParam(required = false) UUID typePurposeUid) {
@@ -130,13 +120,11 @@ public class NomenclatureController {
         return ResponseEntity.ok(nomenclatureService.getAllTypeProducts());
     }
 
-    /** Создать вид номенклатуры */
     @PostMapping("/type-products")
     public ResponseEntity<SprTypeProductDTO> createTypeProduct(@RequestBody CreateTypeProductRequest request) {
         return ResponseEntity.ok(nomenclatureService.createTypeProduct(request));
     }
 
-    /** Обновить вид номенклатуры */
     @PatchMapping("/type-products/{uid}")
     public ResponseEntity<SprTypeProductDTO> updateTypeProduct(
             @PathVariable UUID uid,
@@ -144,10 +132,235 @@ public class NomenclatureController {
         return ResponseEntity.ok(nomenclatureService.updateTypeProduct(uid, request));
     }
 
-    /** Удалить вид номенклатуры */
     @DeleteMapping("/type-products/{uid}")
     public ResponseEntity<Void> deleteTypeProduct(@PathVariable UUID uid) {
         nomenclatureService.deleteTypeProduct(uid);
         return ResponseEntity.ok().build();
+    }
+
+    // ==================== Единицы измерения ====================
+
+    @GetMapping("/measures")
+    public ResponseEntity<List<SprMeasureDTO>> getMeasures() {
+        return ResponseEntity.ok(nomenclatureService.getMeasures());
+    }
+
+    @PostMapping("/measures")
+    public ResponseEntity<SprMeasureDTO> createMeasure(@RequestBody CreateMeasureRequest request) {
+        return ResponseEntity.ok(nomenclatureService.createMeasure(request));
+    }
+
+    @PatchMapping("/measures/{uid}")
+    public ResponseEntity<SprMeasureDTO> updateMeasure(
+            @PathVariable UUID uid,
+            @RequestBody UpdateMeasureRequest request) {
+        return ResponseEntity.ok(nomenclatureService.updateMeasure(uid, request));
+    }
+
+    @DeleteMapping("/measures/{uid}")
+    public ResponseEntity<Void> deleteMeasure(@PathVariable UUID uid) {
+        nomenclatureService.deleteMeasure(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== Производители ====================
+
+    @GetMapping("/manufacturers")
+    public ResponseEntity<List<SprManufacturerDTO>> getManufacturers() {
+        return ResponseEntity.ok(nomenclatureService.getManufacturers());
+    }
+
+    @PostMapping("/manufacturers")
+    public ResponseEntity<SprManufacturerDTO> createManufacturer(@RequestBody CreateManufacturerRequest request) {
+        return ResponseEntity.ok(nomenclatureService.createManufacturer(request));
+    }
+
+    @PatchMapping("/manufacturers/{uid}")
+    public ResponseEntity<SprManufacturerDTO> updateManufacturer(
+            @PathVariable UUID uid,
+            @RequestBody UpdateManufacturerRequest request) {
+        return ResponseEntity.ok(nomenclatureService.updateManufacturer(uid, request));
+    }
+
+    @DeleteMapping("/manufacturers/{uid}")
+    public ResponseEntity<Void> deleteManufacturer(@PathVariable UUID uid) {
+        nomenclatureService.deleteManufacturer(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== Бренды ====================
+
+    @GetMapping("/brands")
+    public ResponseEntity<List<SprBrandDTO>> getBrands(
+            @RequestParam(required = false) UUID manufacturerUid) {
+        return ResponseEntity.ok(nomenclatureService.getBrands(manufacturerUid));
+    }
+
+    @PostMapping("/brands")
+    public ResponseEntity<SprBrandDTO> createBrand(@RequestBody CreateBrandRequest request) {
+        return ResponseEntity.ok(nomenclatureService.createBrand(request));
+    }
+
+    @PatchMapping("/brands/{uid}")
+    public ResponseEntity<SprBrandDTO> updateBrand(
+            @PathVariable UUID uid,
+            @RequestBody UpdateBrandRequest request) {
+        return ResponseEntity.ok(nomenclatureService.updateBrand(uid, request));
+    }
+
+    @DeleteMapping("/brands/{uid}")
+    public ResponseEntity<Void> deleteBrand(@PathVariable UUID uid) {
+        nomenclatureService.deleteBrand(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== Модели ====================
+
+    @GetMapping("/models")
+    public ResponseEntity<List<SprModelOfBrandDTO>> getModels(
+            @RequestParam(required = false) UUID brandUid) {
+        return ResponseEntity.ok(nomenclatureService.getModels(brandUid));
+    }
+
+    @PostMapping("/models")
+    public ResponseEntity<SprModelOfBrandDTO> createModel(@RequestBody CreateModelRequest request) {
+        return ResponseEntity.ok(nomenclatureService.createModel(request));
+    }
+
+    @PatchMapping("/models/{uid}")
+    public ResponseEntity<SprModelOfBrandDTO> updateModel(
+            @PathVariable UUID uid,
+            @RequestBody UpdateModelRequest request) {
+        return ResponseEntity.ok(nomenclatureService.updateModel(uid, request));
+    }
+
+    @DeleteMapping("/models/{uid}")
+    public ResponseEntity<Void> deleteModel(@PathVariable UUID uid) {
+        nomenclatureService.deleteModel(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== Страны ====================
+
+    @GetMapping("/countries")
+    public ResponseEntity<List<SprCountryDTO>> getCountries() {
+        return ResponseEntity.ok(nomenclatureService.getCountries());
+    }
+
+    @PostMapping("/countries")
+    public ResponseEntity<SprCountryDTO> createCountry(@RequestBody CreateCountryRequest request) {
+        return ResponseEntity.ok(nomenclatureService.createCountry(request));
+    }
+
+    @PatchMapping("/countries/{uid}")
+    public ResponseEntity<SprCountryDTO> updateCountry(
+            @PathVariable UUID uid,
+            @RequestBody UpdateCountryRequest request) {
+        return ResponseEntity.ok(nomenclatureService.updateCountry(uid, request));
+    }
+
+    @DeleteMapping("/countries/{uid}")
+    public ResponseEntity<Void> deleteCountry(@PathVariable UUID uid) {
+        nomenclatureService.deleteCountry(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== ИЗОБРАЖЕНИЯ ====================
+
+    @GetMapping("/{materialUid}/images")
+    public ResponseEntity<List<MaterialMediaDTO>> getImages(@PathVariable UUID materialUid) {
+        return ResponseEntity.ok(nomenclatureService.getImages(materialUid));
+    }
+
+    @PostMapping("/{materialUid}/images")
+    public ResponseEntity<MaterialMediaDTO> uploadImage(
+            @PathVariable UUID materialUid,
+            @RequestParam("file") MultipartFile file) {
+        try {
+            return ResponseEntity.ok(nomenclatureService.uploadImage(materialUid, file));
+        } catch (IOException e) {
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @DeleteMapping("/images/{uid}")
+    public ResponseEntity<Void> deleteImage(@PathVariable UUID uid) {
+        nomenclatureService.deleteImage(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== ЧЕРТЕЖИ ====================
+
+    @GetMapping("/{materialUid}/blueprints")
+    public ResponseEntity<List<MaterialMediaDTO>> getBlueprints(@PathVariable UUID materialUid) {
+        return ResponseEntity.ok(nomenclatureService.getBlueprints(materialUid));
+    }
+
+    @PostMapping("/{materialUid}/blueprints")
+    public ResponseEntity<MaterialMediaDTO> uploadBlueprint(
+            @PathVariable UUID materialUid,
+            @RequestParam("file") MultipartFile file) {
+        try {
+            return ResponseEntity.ok(nomenclatureService.uploadBlueprint(materialUid, file));
+        } catch (IOException e) {
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @DeleteMapping("/blueprints/{uid}")
+    public ResponseEntity<Void> deleteBlueprint(@PathVariable UUID uid) {
+        nomenclatureService.deleteBlueprint(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== QR-КОДЫ ====================
+
+    @GetMapping("/{materialUid}/qrcodes")
+    public ResponseEntity<List<MaterialMediaDTO>> getQrcodes(@PathVariable UUID materialUid) {
+        return ResponseEntity.ok(nomenclatureService.getQrcodes(materialUid));
+    }
+
+    @PostMapping("/{materialUid}/qrcodes")
+    public ResponseEntity<MaterialMediaDTO> uploadQrcode(
+            @PathVariable UUID materialUid,
+            @RequestParam("file") MultipartFile file) {
+        try {
+            return ResponseEntity.ok(nomenclatureService.uploadQrcode(materialUid, file));
+        } catch (IOException e) {
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @DeleteMapping("/qrcodes/{uid}")
+    public ResponseEntity<Void> deleteQrcode(@PathVariable UUID uid) {
+        nomenclatureService.deleteQrcode(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== ЦЕНЫ ====================
+
+    @GetMapping("/{materialUid}/prices")
+    public ResponseEntity<List<MaterialPriceDTO>> getPrices(@PathVariable UUID materialUid) {
+        return ResponseEntity.ok(nomenclatureService.getPrices(materialUid));
+    }
+
+    @PostMapping("/{materialUid}/prices")
+    public ResponseEntity<MaterialPriceDTO> addPrice(
+            @PathVariable UUID materialUid,
+            @RequestBody AddPriceRequest request) {
+        return ResponseEntity.ok(nomenclatureService.addPrice(materialUid, request));
+    }
+
+    @DeleteMapping("/prices/{priceUid}")
+    public ResponseEntity<Void> deletePrice(@PathVariable UUID priceUid) {
+        nomenclatureService.deletePrice(priceUid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== Получение одного материала ====================
+
+    @GetMapping("/{uid}")
+    public ResponseEntity<SprMaterialDTO> getMaterial(@PathVariable UUID uid) {
+        return ResponseEntity.ok(nomenclatureService.getMaterial(uid));
     }
 }

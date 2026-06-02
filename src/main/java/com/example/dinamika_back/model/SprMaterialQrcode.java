@@ -8,27 +8,26 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "reg_price")
+@Table(name = "spr_material_qrcodes")
 @Getter
 @Setter
 @NoArgsConstructor
-public class RegPrice {
+public class SprMaterialQrcode {
 
     @Id
     @Column(name = "uid", nullable = false)
     private UUID uid;
 
-    @Column(name = "price", nullable = false)
-    private Double price;
-
-    @Column(name = "price_date")
-    private LocalDateTime priceDate;
-
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "link")
+    @JoinColumn(name = "material_uid", nullable = false)
     private SprMaterial material;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "doc_entrance_uid")
-    private DocEntrance docEntrance;
+    @Column(name = "file_path", nullable = false)
+    private String filePath;
+
+    @Column(name = "original_name")
+    private String originalName;
+
+    @Column(name = "created_at")
+    private LocalDateTime createdAt;
 }

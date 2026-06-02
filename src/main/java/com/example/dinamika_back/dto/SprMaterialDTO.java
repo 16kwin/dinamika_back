@@ -1,27 +1,37 @@
 package com.example.dinamika_back.dto;
 
-import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
 import java.util.UUID;
 
-@Data
+@Getter
+@Setter
 public class SprMaterialDTO {
     private UUID uid;
     private Integer code;
     private String name;
     private String article;
     private String description;
-    
-    // Каталог (дерево групп)
     private UUID groupUid;
     private String groupName;
-    
-    // НОВЫЕ ПОЛЯ:
     private UUID typeMainUid;
-    private String typeMainName;         // "ТМЦ" или "Готовая деталь"
-    
+    private String typeMainName;
     private UUID typePurposeUid;
-    private String typePurposeName;      // "Металлообрабатывающий инструмент" и т.д.
-    
+    private String typePurposeName;
     private UUID typeProductUid;
-    private String typeProductName;      // "Сверло", "Фреза" и т.д.
+    private String typeProductName;
+    private Boolean usage;
+    private Boolean wasteMaterial;
+    private Boolean recycleMaterial;
+    private UUID measureUid;
+    private String measureName;
+    private UUID manufacturerUid;
+    private String manufacturerName;
+    private UUID brandUid;
+    private String brandName;
+    private UUID modelOfBrandUid;
+    private String modelOfBrandName;
+    private UUID countryUid;
+    private String countryName;
+    private String barcode;
 }
