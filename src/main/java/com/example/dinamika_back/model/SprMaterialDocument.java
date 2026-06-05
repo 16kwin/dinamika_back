@@ -1,4 +1,4 @@
-// RegAnalog.java
+// SprMaterialDocument.java
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
@@ -7,11 +7,11 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "reg_analog")
+@Table(name = "spr_material_documents")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class RegAnalog {
+public class SprMaterialDocument {
 
     @Id
     private UUID uid;
@@ -20,12 +20,14 @@ public class RegAnalog {
     @JoinColumn(name = "material_uid", nullable = false)
     private SprMaterial material;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "analog_material_uid", nullable = false)
-    private SprMaterial analogMaterial;
+    @Column(name = "document_name", nullable = false)
+    private String documentName;
 
-    @Column(name = "compatibility_percent", nullable = false)
-    private Integer compatibilityPercent;
+    @Column(name = "file_path", nullable = false)
+    private String filePath;
+
+    @Column(name = "original_name")
+    private String originalName;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;

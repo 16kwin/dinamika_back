@@ -1,3 +1,4 @@
+// ==================== ПОЛНЫЙ NomenclatureController.java ====================
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
@@ -8,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -135,6 +137,31 @@ public class NomenclatureController {
     @DeleteMapping("/type-products/{uid}")
     public ResponseEntity<Void> deleteTypeProduct(@PathVariable UUID uid) {
         nomenclatureService.deleteTypeProduct(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== Виды характеристик ====================
+
+    @GetMapping("/type-attributes")
+    public ResponseEntity<List<SprTypeAttributeDTO>> getTypeAttributes() {
+        return ResponseEntity.ok(nomenclatureService.getTypeAttributes());
+    }
+
+    @PostMapping("/type-attributes")
+    public ResponseEntity<SprTypeAttributeDTO> createTypeAttribute(@RequestBody CreateTypeAttributeRequest request) {
+        return ResponseEntity.ok(nomenclatureService.createTypeAttribute(request));
+    }
+
+    @PatchMapping("/type-attributes/{uid}")
+    public ResponseEntity<SprTypeAttributeDTO> updateTypeAttribute(
+            @PathVariable UUID uid,
+            @RequestBody UpdateTypeAttributeRequest request) {
+        return ResponseEntity.ok(nomenclatureService.updateTypeAttribute(uid, request));
+    }
+
+    @DeleteMapping("/type-attributes/{uid}")
+    public ResponseEntity<Void> deleteTypeAttribute(@PathVariable UUID uid) {
+        nomenclatureService.deleteTypeAttribute(uid);
         return ResponseEntity.ok().build();
     }
 
@@ -313,27 +340,188 @@ public class NomenclatureController {
         return ResponseEntity.ok().build();
     }
 
-    // ==================== QR-КОДЫ ====================
+    // ==================== КОДЫ (QR, BARCODE, SKU) ====================
 
-    @GetMapping("/{materialUid}/qrcodes")
-    public ResponseEntity<List<MaterialMediaDTO>> getQrcodes(@PathVariable UUID materialUid) {
-        return ResponseEntity.ok(nomenclatureService.getQrcodes(materialUid));
+    @GetMapping("/{materialUid}/codes")
+    public ResponseEntity<List<MaterialCodeDTO>> getCodes(
+            @PathVariable UUID materialUid,
+            @RequestParam(value = "codeKind", required = false) String codeKind) {
+        if (codeKind != null) {
+            return ResponseEntity.ok(nomenclatureService.getCodesByKind(materialUid, codeKind));
+        }
+        return ResponseEntity.ok(nomenclatureService.getCodes(materialUid));
     }
 
-    @PostMapping("/{materialUid}/qrcodes")
-    public ResponseEntity<MaterialMediaDTO> uploadQrcode(
+    @PostMapping("/{materialUid}/codes")
+    public ResponseEntity<MaterialCodeDTO> uploadCode(
             @PathVariable UUID materialUid,
-            @RequestParam("file") MultipartFile file) {
+            @RequestParam(value = "codeType", defaultValue = "QR_CODE") String codeType,
+            @RequestParam(value = "codeValue", required = false) String codeValue,
+            @RequestParam(value = "codeKind", defaultValue = "QR") String codeKind,
+            @RequestParam(value = "file", required = false) MultipartFile file) {
         try {
-            return ResponseEntity.ok(nomenclatureService.uploadQrcode(materialUid, file));
+            return ResponseEntity.ok(nomenclatureService.uploadCode(materialUid, codeType, codeValue, codeKind, file));
         } catch (IOException e) {
             return ResponseEntity.internalServerError().build();
         }
     }
 
-    @DeleteMapping("/qrcodes/{uid}")
-    public ResponseEntity<Void> deleteQrcode(@PathVariable UUID uid) {
-        nomenclatureService.deleteQrcode(uid);
+    @DeleteMapping("/codes/{uid}")
+    public ResponseEntity<Void> deleteCode(@PathVariable UUID uid) {
+        nomenclatureService.deleteCode(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== ДОКУМЕНТЫ ====================
+
+    @GetMapping("/{materialUid}/documents")
+    public ResponseEntity<List<MaterialDocumentDTO>> getDocuments(@PathVariable UUID materialUid) {
+        return ResponseEntity.ok(nomenclatureService.getDocuments(materialUid));
+    }
+
+    @PostMapping("/{materialUid}/documents")
+    public ResponseEntity<MaterialDocumentDTO> uploadDocument(
+            @PathVariable UUID materialUid,
+            @RequestParam("documentName") String documentName,
+            @RequestParam("file") MultipartFile file) {
+        try {
+            return ResponseEntity.ok(nomenclatureService.uploadDocument(materialUid, documentName, file));
+        } catch (IOException e) {
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @DeleteMapping("/documents/{uid}")
+    public ResponseEntity<Void> deleteDocument(@PathVariable UUID uid) {
+        nomenclatureService.deleteDocument(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== СПРАВОЧНИК ПОСТАВЩИКОВ ====================
+
+    @GetMapping("/suppliers")
+    public ResponseEntity<List<SprSupplierDTO>> getSuppliers() {
+        return ResponseEntity.ok(nomenclatureService.getSuppliers());
+    }
+
+    @PostMapping("/suppliers")
+    public ResponseEntity<SprSupplierDTO> createSupplier(@RequestBody CreateSupplierRequest request) {
+        return ResponseEntity.ok(nomenclatureService.createSupplier(request));
+    }
+
+    @PatchMapping("/suppliers/{uid}")
+    public ResponseEntity<SprSupplierDTO> updateSupplier(
+            @PathVariable UUID uid,
+            @RequestBody UpdateSupplierRequest request) {
+        return ResponseEntity.ok(nomenclatureService.updateSupplier(uid, request));
+    }
+
+    @DeleteMapping("/suppliers/{uid}")
+    public ResponseEntity<Void> deleteSupplier(@PathVariable UUID uid) {
+        nomenclatureService.deleteSupplier(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== ПРИВЯЗКА ПОСТАВЩИКОВ К МАТЕРИАЛУ ====================
+
+    @GetMapping("/{materialUid}/supply")
+    public ResponseEntity<List<MaterialSupplyDTO>> getMaterialSupplies(@PathVariable UUID materialUid) {
+        return ResponseEntity.ok(nomenclatureService.getMaterialSupplies(materialUid));
+    }
+
+    @PostMapping("/{materialUid}/supply")
+    public ResponseEntity<MaterialSupplyDTO> addMaterialSupply(
+            @PathVariable UUID materialUid,
+            @RequestParam("supplierUid") UUID supplierUid,
+            @RequestParam(value = "supplyDate", required = false) String supplyDate,
+            @RequestParam(value = "documentName", required = false) String documentName,
+            @RequestParam(value = "file", required = false) MultipartFile file) {
+        try {
+            CreateSupplyRequest request = new CreateSupplyRequest();
+            request.setSupplierUid(supplierUid);
+            request.setSupplyDate(supplyDate != null ? LocalDateTime.parse(supplyDate) : null);
+            request.setDocumentName(documentName);
+            return ResponseEntity.ok(nomenclatureService.addMaterialSupply(materialUid, request, file));
+        } catch (IOException e) {
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @DeleteMapping("/supply/{uid}")
+    public ResponseEntity<Void> deleteMaterialSupply(@PathVariable UUID uid) {
+        nomenclatureService.deleteMaterialSupply(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== АНАЛОГИ ====================
+
+    @GetMapping("/{materialUid}/analogs")
+    public ResponseEntity<List<MaterialAnalogDTO>> getAnalogs(@PathVariable UUID materialUid) {
+        return ResponseEntity.ok(nomenclatureService.getAnalogs(materialUid));
+    }
+
+    @PostMapping("/calculate-compatibility")
+    public ResponseEntity<CalculateCompatibilityResponse> calculateCompatibility(
+            @RequestBody CalculateCompatibilityRequest request) {
+        return ResponseEntity.ok(nomenclatureService.calculateCompatibility(
+                request.getMaterialUid1(), request.getMaterialUid2()));
+    }
+
+    @PostMapping("/{materialUid}/analogs")
+    public ResponseEntity<MaterialAnalogDTO> addAnalog(
+            @PathVariable UUID materialUid,
+            @RequestBody CreateAnalogRequest request) {
+        return ResponseEntity.ok(nomenclatureService.addAnalog(materialUid, request));
+    }
+
+    @DeleteMapping("/analogs/{uid}")
+    public ResponseEntity<Void> deleteAnalog(@PathVariable UUID uid) {
+        nomenclatureService.deleteAnalog(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== РЕЙТИНГ ====================
+
+    @GetMapping("/{materialUid}/ratings")
+    public ResponseEntity<List<MaterialRatingDTO>> getRatings(@PathVariable UUID materialUid) {
+        return ResponseEntity.ok(nomenclatureService.getRatings(materialUid));
+    }
+
+    @GetMapping("/{materialUid}/ratings/average")
+    public ResponseEntity<Double> getAverageRating(@PathVariable UUID materialUid) {
+        return ResponseEntity.ok(nomenclatureService.getAverageRating(materialUid));
+    }
+
+    @PostMapping("/{materialUid}/ratings")
+    public ResponseEntity<MaterialRatingDTO> addRating(
+            @PathVariable UUID materialUid,
+            @RequestBody AddRatingRequest request) {
+        return ResponseEntity.ok(nomenclatureService.addRating(materialUid, request));
+    }
+
+    @DeleteMapping("/ratings/{uid}")
+    public ResponseEntity<Void> deleteRating(@PathVariable UUID uid) {
+        nomenclatureService.deleteRating(uid);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== ИНТЕГРАЦИЯ ====================
+
+    @GetMapping("/{materialUid}/integrations")
+    public ResponseEntity<List<MaterialIntegrationDTO>> getIntegrations(@PathVariable UUID materialUid) {
+        return ResponseEntity.ok(nomenclatureService.getIntegrations(materialUid));
+    }
+
+    @PostMapping("/{materialUid}/integrations")
+    public ResponseEntity<MaterialIntegrationDTO> addIntegration(
+            @PathVariable UUID materialUid,
+            @RequestBody CreateIntegrationRequest request) {
+        return ResponseEntity.ok(nomenclatureService.addIntegration(materialUid, request));
+    }
+
+    @DeleteMapping("/integrations/{uid}")
+    public ResponseEntity<Void> deleteIntegration(@PathVariable UUID uid) {
+        nomenclatureService.deleteIntegration(uid);
         return ResponseEntity.ok().build();
     }
 
@@ -357,7 +545,35 @@ public class NomenclatureController {
         return ResponseEntity.ok().build();
     }
 
+    // ==================== ХАРАКТЕРИСТИКИ ====================
+
+    @GetMapping("/{materialUid}/characteristics")
+    public ResponseEntity<List<MaterialCharacteristicDTO>> getCharacteristics(@PathVariable UUID materialUid) {
+        return ResponseEntity.ok(nomenclatureService.getCharacteristics(materialUid));
+    }
+
+    @PostMapping("/{materialUid}/characteristics")
+    public ResponseEntity<MaterialCharacteristicDTO> addCharacteristic(
+            @PathVariable UUID materialUid,
+            @RequestBody CreateCharacteristicRequest request) {
+        return ResponseEntity.ok(nomenclatureService.addCharacteristic(materialUid, request));
+    }
+
+    @PatchMapping("/characteristics/{uid}")
+    public ResponseEntity<MaterialCharacteristicDTO> updateCharacteristic(
+            @PathVariable UUID uid,
+            @RequestBody UpdateCharacteristicRequest request) {
+        return ResponseEntity.ok(nomenclatureService.updateCharacteristic(uid, request));
+    }
+
+    @DeleteMapping("/characteristics/{uid}")
+    public ResponseEntity<Void> deleteCharacteristic(@PathVariable UUID uid) {
+        nomenclatureService.deleteCharacteristic(uid);
+        return ResponseEntity.ok().build();
+    }
+
     // ==================== Получение одного материала ====================
+    // ВАЖНО: этот метод должен быть ПОСЛЕ всех /{materialUid}/...
 
     @GetMapping("/{uid}")
     public ResponseEntity<SprMaterialDTO> getMaterial(@PathVariable UUID uid) {

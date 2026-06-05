@@ -1,32 +1,39 @@
+// SprMaterialCode.java
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "spr_material_qrcodes")
-@Getter
-@Setter
+@Table(name = "spr_material_codes")
+@Data
 @NoArgsConstructor
-public class SprMaterialQrcode {
+@AllArgsConstructor
+public class SprMaterialCode {
 
     @Id
-    @Column(name = "uid", nullable = false)
     private UUID uid;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "material_uid", nullable = false)
     private SprMaterial material;
 
-    @Column(name = "file_path", nullable = false)
+    @Column(name = "file_path")
     private String filePath;
 
     @Column(name = "original_name")
     private String originalName;
+
+    @Column(name = "code_type")
+    private String codeType;
+
+    @Column(name = "code_value")
+    private String codeValue;
+
+    @Column(name = "code_kind")
+    private String codeKind;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;

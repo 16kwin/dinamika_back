@@ -115,10 +115,6 @@ public class SprMaterial {
     @Column(name = "recycle_material")
     private Boolean recycleMaterial;
 
-    /** Штрихкод */
-    @Column(name = "barcode")
-    private String barcode;
-
     /** Описание */
     @Column(name = "description")
     private String description;
@@ -132,11 +128,6 @@ public class SprMaterial {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "suppliers")
     private RegSuppliers suppliers;
-
-    /** Список аналогов */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "analog")
-    private RegAnalog analog;
 
     /** Список атрибутов и характеристик */
     @ManyToOne(fetch = FetchType.LAZY)

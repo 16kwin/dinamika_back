@@ -16,9 +16,6 @@ public interface SprMaterialRepository extends JpaRepository<SprMaterial, UUID> 
     /** Найти материал по артикулу */
     Optional<SprMaterial> findByArticle(String article);
     
-    /** Найти материал по штрихкоду */
-    Optional<SprMaterial> findByBarcode(String barcode);
-    
     /** Поиск материалов по наименованию (содержит) */
     List<SprMaterial> findByNameMaterialContainingIgnoreCase(String name);
     

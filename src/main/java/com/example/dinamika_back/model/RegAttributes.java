@@ -1,34 +1,32 @@
+// ==================== ИСПРАВЛЕННЫЙ ФАЙЛ: RegAttributes.java ====================
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
-
+import lombok.*;
 import java.util.UUID;
 
-/**
- * Регистр "Атрибуты".
- * Хранит значения атрибутов, назначенных номенклатуре.
- * Каждый атрибут имеет тип (из справочника SprTypeAttributes) и значение.
- */
 @Entity
 @Table(name = "reg_attributes")
-@Getter
-@Setter
+@Data
 @NoArgsConstructor
+@AllArgsConstructor
 public class RegAttributes {
 
     @Id
-    @Column(name = "uid", nullable = false)
     private UUID uid;
 
-    /** Вид атрибута (ссылка на справочник типов атрибутов) */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "name")
-    private SprTypeAttributes attributeType;
+    private SprTypeAttributes attributeType;  // Тип атрибута (характеристика)
 
-    /** Значение атрибута */
     @Column(name = "meaning")
-    private String meaning;
+    private String meaning;  // Значение
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "measure_uid")
+    private SprMeasure measure;  // Единица измерения
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "material_uid")
+    private SprMaterial material;  // Привязка к материалу
 }

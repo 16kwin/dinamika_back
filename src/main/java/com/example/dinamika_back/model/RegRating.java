@@ -1,4 +1,4 @@
-// RegAnalog.java
+// RegRating.java
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
@@ -7,11 +7,11 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "reg_analog")
+@Table(name = "reg_rating")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class RegAnalog {
+public class RegRating {
 
     @Id
     private UUID uid;
@@ -20,12 +20,14 @@ public class RegAnalog {
     @JoinColumn(name = "material_uid", nullable = false)
     private SprMaterial material;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "analog_material_uid", nullable = false)
-    private SprMaterial analogMaterial;
+    @Column(name = "rating", nullable = false)
+    private Integer rating;
 
-    @Column(name = "compatibility_percent", nullable = false)
-    private Integer compatibilityPercent;
+    @Column(name = "comment")
+    private String comment;
+
+    @Column(name = "author")
+    private String author;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;

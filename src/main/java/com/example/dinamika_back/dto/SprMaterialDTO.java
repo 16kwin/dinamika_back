@@ -33,5 +33,4 @@ public class SprMaterialDTO {
     private String modelOfBrandName;
     private UUID countryUid;
     private String countryName;
-    private String barcode;
 }

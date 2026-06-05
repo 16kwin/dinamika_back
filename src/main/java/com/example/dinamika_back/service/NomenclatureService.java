@@ -1,3 +1,4 @@
+// ==================== ПОЛНЫЙ NomenclatureService.java ====================
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -32,10 +33,17 @@ public class NomenclatureService {
     private final SprCountryRepository countryRepository;
     private final SprMaterialImageRepository imageRepository;
     private final SprMaterialBlueprintRepository blueprintRepository;
-    private final SprMaterialQrcodeRepository qrcodeRepository;
+    private final SprMaterialCodeRepository codeRepository;
+    private final SprMaterialDocumentRepository documentRepository;
     private final RegPriceRepository priceRepository;
-    private final SprSupplierRepository suppliersRepository;
+    private final SprSupplierRepository sprSupplierRepository;
     private final DocEntranceRepository docEntranceRepository;
+    private final RegAttributesRepository regAttributesRepository;
+    private final SprTypeAttributesRepository typeAttributesRepository;
+    private final RegSuppliersRepository regSuppliersRepository;
+    private final RegAnalogRepository regAnalogRepository;
+    private final RegRatingRepository regRatingRepository;
+    private final RegIntegrationRepository regIntegrationRepository;
 
     private static final String NOMENCLATURE_UPLOAD_DIR = "uploads/nomenclature/";
 
@@ -91,7 +99,6 @@ public class NomenclatureService {
         dto.setUsage(material.getUsage());
         dto.setWasteMaterial(material.getWasteMaterial());
         dto.setRecycleMaterial(material.getRecycleMaterial());
-        dto.setBarcode(material.getBarcode());
 
         if (material.getGroupMaterial() != null) {
             dto.setGroupUid(material.getGroupMaterial().getUid());
@@ -171,13 +178,14 @@ public class NomenclatureService {
                     return newMaterial;
                 });
 
+        boolean isNewMaterial = material.getNameMaterial() == null;
+
         material.setNameMaterial(request.getName());
         material.setArticle(request.getArticle());
         material.setDescription(request.getDescription());
         material.setUsage(request.getUsage());
         material.setWasteMaterial(request.getWasteMaterial());
         material.setRecycleMaterial(request.getRecycleMaterial());
-        material.setBarcode(request.getBarcode());
 
         if (request.getGroupUid() != null) {
             RegGroupMaterial group = groupMaterialRepository.findById(request.getGroupUid()).orElse(null);
@@ -217,6 +225,171 @@ public class NomenclatureService {
         }
 
         materialRepository.save(material);
+
+        if (isNewMaterial) {
+            createDefaultCharacteristics(material.getUid());
+        }
+    }
+
+    // ==================== ХАРАКТЕРИСТИКИ ====================
+
+    private void createDefaultCharacteristics(UUID materialUid) {
+        SprMaterial material = materialRepository.findById(materialUid)
+                .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid));
+
+        String[] defaultNames = {"Длина", "Ширина", "Высота", "Масса"};
+        
+        for (String name : defaultNames) {
+            SprTypeAttributes attrType = typeAttributesRepository.findAll().stream()
+                    .filter(a -> name.equals(a.getName()))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        SprTypeAttributes newAttr = new SprTypeAttributes();
+                        newAttr.setUid(UUID.randomUUID());
+                        newAttr.setName(name);
+                        return typeAttributesRepository.save(newAttr);
+                    });
+
+            RegAttributes regAttr = new RegAttributes();
+            regAttr.setUid(UUID.randomUUID());
+            regAttr.setMaterial(material);
+            regAttr.setAttributeType(attrType);
+            regAttr.setMeaning(null);
+            regAttr.setMeasure(null);
+            regAttributesRepository.save(regAttr);
+        }
+    }
+
+    public List<MaterialCharacteristicDTO> getCharacteristics(UUID materialUid) {
+        List<RegAttributes> attrs = regAttributesRepository.findByMaterialUid(materialUid);
+        
+        return attrs.stream()
+                .map(a -> {
+                    boolean isCustom = a.getAttributeType() == null;
+                    return new MaterialCharacteristicDTO(
+                            a.getUid(),
+                            a.getMaterial() != null ? a.getMaterial().getUid() : materialUid,
+                            a.getAttributeType() != null ? a.getAttributeType().getUid() : null,
+                            a.getAttributeType() != null ? a.getAttributeType().getName() : null,
+                            isCustom ? (a.getMeaning() != null ? a.getMeaning() : "Пользовательская") : null,
+                            isCustom ? null : a.getMeaning(),
+                            a.getMeasure() != null ? a.getMeasure().getUid() : null,
+                            a.getMeasure() != null ? a.getMeasure().getName() : null,
+                            isCustom
+                    );
+                })
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public MaterialCharacteristicDTO addCharacteristic(UUID materialUid, CreateCharacteristicRequest request) {
+        SprMaterial material = materialRepository.findById(materialUid)
+                .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid));
+
+        RegAttributes regAttr = new RegAttributes();
+        regAttr.setUid(UUID.randomUUID());
+        regAttr.setMaterial(material);
+
+        if (request.getAttributeTypeUid() != null) {
+            SprTypeAttributes attrType = typeAttributesRepository.findById(request.getAttributeTypeUid())
+                    .orElseThrow(() -> new RuntimeException("Тип атрибута не найден: " + request.getAttributeTypeUid()));
+            regAttr.setAttributeType(attrType);
+            regAttr.setMeaning(request.getValue());
+        } else {
+            regAttr.setAttributeType(null);
+            regAttr.setMeaning(request.getCustomName() + "::" + (request.getValue() != null ? request.getValue() : ""));
+        }
+
+        if (request.getMeasureUid() != null) {
+            regAttr.setMeasure(measureRepository.findById(request.getMeasureUid()).orElse(null));
+        }
+
+        regAttributesRepository.save(regAttr);
+
+        return new MaterialCharacteristicDTO(
+                regAttr.getUid(),
+                materialUid,
+                regAttr.getAttributeType() != null ? regAttr.getAttributeType().getUid() : null,
+                regAttr.getAttributeType() != null ? regAttr.getAttributeType().getName() : null,
+                request.getCustomName(),
+                request.getValue(),
+                regAttr.getMeasure() != null ? regAttr.getMeasure().getUid() : null,
+                regAttr.getMeasure() != null ? regAttr.getMeasure().getName() : null,
+                request.getAttributeTypeUid() == null
+        );
+    }
+
+    @Transactional
+    public MaterialCharacteristicDTO updateCharacteristic(UUID characteristicUid, UpdateCharacteristicRequest request) {
+        RegAttributes attr = regAttributesRepository.findById(characteristicUid)
+                .orElseThrow(() -> new RuntimeException("Характеристика не найдена: " + characteristicUid));
+
+        if (request.getValue() != null) {
+            if (attr.getAttributeType() == null && attr.getMeaning() != null && attr.getMeaning().contains("::")) {
+                String customName = attr.getMeaning().split("::")[0];
+                attr.setMeaning(customName + "::" + request.getValue());
+            } else {
+                attr.setMeaning(request.getValue());
+            }
+        }
+
+        if (request.getMeasureUid() != null) {
+            attr.setMeasure(measureRepository.findById(request.getMeasureUid()).orElse(null));
+        }
+
+        regAttributesRepository.save(attr);
+
+        return new MaterialCharacteristicDTO(
+                attr.getUid(),
+                attr.getMaterial() != null ? attr.getMaterial().getUid() : null,
+                attr.getAttributeType() != null ? attr.getAttributeType().getUid() : null,
+                attr.getAttributeType() != null ? attr.getAttributeType().getName() : null,
+                attr.getAttributeType() == null && attr.getMeaning() != null && attr.getMeaning().contains("::") 
+                    ? attr.getMeaning().split("::")[0] : null,
+                attr.getAttributeType() != null ? attr.getMeaning() : 
+                    (attr.getMeaning() != null && attr.getMeaning().contains("::") ? attr.getMeaning().split("::")[1] : attr.getMeaning()),
+                attr.getMeasure() != null ? attr.getMeasure().getUid() : null,
+                attr.getMeasure() != null ? attr.getMeasure().getName() : null,
+                attr.getAttributeType() == null
+        );
+    }
+
+    @Transactional
+    public void deleteCharacteristic(UUID characteristicUid) {
+        regAttributesRepository.deleteById(characteristicUid);
+    }
+
+    // ==================== ВИДЫ ХАРАКТЕРИСТИК ====================
+
+    public List<SprTypeAttributeDTO> getTypeAttributes() {
+        return typeAttributesRepository.findAll().stream()
+                .map(a -> new SprTypeAttributeDTO(a.getUid(), a.getName(), a.getDesignation()))
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public SprTypeAttributeDTO createTypeAttribute(CreateTypeAttributeRequest request) {
+        SprTypeAttributes attr = new SprTypeAttributes();
+        attr.setUid(UUID.randomUUID());
+        attr.setName(request.getName());
+        attr.setDesignation(request.getDesignation());
+        typeAttributesRepository.save(attr);
+        return new SprTypeAttributeDTO(attr.getUid(), attr.getName(), attr.getDesignation());
+    }
+
+    @Transactional
+    public SprTypeAttributeDTO updateTypeAttribute(UUID uid, UpdateTypeAttributeRequest request) {
+        SprTypeAttributes attr = typeAttributesRepository.findById(uid)
+                .orElseThrow(() -> new RuntimeException("Вид характеристики не найден: " + uid));
+        if (request.getName() != null) attr.setName(request.getName());
+        if (request.getDesignation() != null) attr.setDesignation(request.getDesignation());
+        typeAttributesRepository.save(attr);
+        return new SprTypeAttributeDTO(attr.getUid(), attr.getName(), attr.getDesignation());
+    }
+
+    @Transactional
+    public void deleteTypeAttribute(UUID uid) {
+        typeAttributesRepository.deleteById(uid);
     }
 
     // ==================== Дерево ====================
@@ -302,6 +475,7 @@ public class NomenclatureService {
         if (request.getMaterialUids() != null) {
             for (UUID materialUid : request.getMaterialUids()) {
                 deleteAllMaterialMedia(materialUid);
+                regAttributesRepository.deleteByMaterialUid(materialUid);
             }
             materialRepository.deleteAllById(request.getMaterialUids());
         }
@@ -325,6 +499,7 @@ public class NomenclatureService {
         List<SprMaterial> materials = materialRepository.findByGroupMaterialUid(groupUid);
         for (SprMaterial material : materials) {
             deleteAllMaterialMedia(material.getUid());
+            regAttributesRepository.deleteByMaterialUid(material.getUid());
         }
         materialRepository.deleteAll(materials);
 
@@ -395,7 +570,6 @@ public class NomenclatureService {
         copy.setUsage(source.getUsage());
         copy.setWasteMaterial(source.getWasteMaterial());
         copy.setRecycleMaterial(source.getRecycleMaterial());
-        copy.setBarcode(source.getBarcode());
         copy.setMeasure(source.getMeasure());
         copy.setManufacturer(source.getManufacturer());
         copy.setBrand(source.getBrand());
@@ -868,54 +1042,428 @@ public class NomenclatureService {
         blueprintRepository.delete(blueprint);
     }
 
-    // ==================== QR-КОДЫ ====================
+    // ==================== КОДЫ (QR, BARCODE, SKU) ====================
 
-    public List<MaterialMediaDTO> getQrcodes(UUID materialUid) {
-        return qrcodeRepository.findByMaterialUid(materialUid).stream()
-                .map(qr -> new MaterialMediaDTO(
-                        qr.getUid(),
-                        qr.getMaterial().getUid(),
-                        qr.getFilePath(),
-                        qr.getOriginalName(),
-                        getFileUrl(materialUid, qr.getFilePath()),
-                        null))
+    public List<MaterialCodeDTO> getCodes(UUID materialUid) {
+        return codeRepository.findByMaterialUidOrderByCreatedAtDesc(materialUid).stream()
+                .map(c -> new MaterialCodeDTO(
+                        c.getUid(),
+                        c.getMaterial().getUid(),
+                        c.getFilePath(),
+                        c.getOriginalName(),
+                        c.getCodeType(),
+                        c.getCodeValue(),
+                        c.getCodeKind(),
+                        c.getFilePath() != null ? getFileUrl(materialUid, c.getFilePath()) : null,
+                        c.getCreatedAt()))
+                .collect(Collectors.toList());
+    }
+
+    public List<MaterialCodeDTO> getCodesByKind(UUID materialUid, String codeKind) {
+        return codeRepository.findByMaterialUidAndCodeKindOrderByCreatedAtDesc(materialUid, codeKind).stream()
+                .map(c -> new MaterialCodeDTO(
+                        c.getUid(),
+                        c.getMaterial().getUid(),
+                        c.getFilePath(),
+                        c.getOriginalName(),
+                        c.getCodeType(),
+                        c.getCodeValue(),
+                        c.getCodeKind(),
+                        c.getFilePath() != null ? getFileUrl(materialUid, c.getFilePath()) : null,
+                        c.getCreatedAt()))
                 .collect(Collectors.toList());
     }
 
     @Transactional
-    public MaterialMediaDTO uploadQrcode(UUID materialUid, MultipartFile file) throws IOException {
+    public MaterialCodeDTO uploadCode(UUID materialUid, String codeType, String codeValue, String codeKind, MultipartFile file) throws IOException {
+        SprMaterial material = materialRepository.findById(materialUid)
+                .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid));
+
+        SprMaterialCode code = new SprMaterialCode();
+        code.setUid(UUID.randomUUID());
+        code.setMaterial(material);
+        code.setCodeType(codeType != null ? codeType : "QR_CODE");
+        code.setCodeValue(codeValue);
+        code.setCodeKind(codeKind != null ? codeKind : "QR");
+
+        if (file != null && !file.isEmpty()) {
+            String fileName = saveFile(materialUid, file);
+            code.setFilePath(fileName);
+            code.setOriginalName(file.getOriginalFilename());
+        }
+
+        code.setCreatedAt(LocalDateTime.now());
+        codeRepository.save(code);
+
+        return new MaterialCodeDTO(
+                code.getUid(),
+                materialUid,
+                code.getFilePath(),
+                code.getOriginalName(),
+                code.getCodeType(),
+                code.getCodeValue(),
+                code.getCodeKind(),
+                code.getFilePath() != null ? getFileUrl(materialUid, code.getFilePath()) : null,
+                code.getCreatedAt());
+    }
+
+    @Transactional
+    public void deleteCode(UUID codeUid) {
+        SprMaterialCode code = codeRepository.findById(codeUid).orElse(null);
+        if (code != null && code.getFilePath() != null) {
+            deleteFile(code.getMaterial().getUid(), code.getFilePath());
+        }
+        codeRepository.deleteById(codeUid);
+    }
+
+    // ==================== ДОКУМЕНТЫ ====================
+
+    public List<MaterialDocumentDTO> getDocuments(UUID materialUid) {
+        return documentRepository.findByMaterialUidOrderByCreatedAtDesc(materialUid).stream()
+                .map(doc -> new MaterialDocumentDTO(
+                        doc.getUid(),
+                        doc.getMaterial().getUid(),
+                        doc.getDocumentName(),
+                        doc.getFilePath(),
+                        doc.getOriginalName(),
+                        getFileUrl(materialUid, doc.getFilePath()),
+                        doc.getCreatedAt()))
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public MaterialDocumentDTO uploadDocument(UUID materialUid, String documentName, MultipartFile file) throws IOException {
         String fileName = saveFile(materialUid, file);
 
         SprMaterial material = materialRepository.findById(materialUid)
                 .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid));
 
-        SprMaterialQrcode qrcode = new SprMaterialQrcode();
-        qrcode.setUid(UUID.randomUUID());
-        qrcode.setMaterial(material);
-        qrcode.setFilePath(fileName);
-        qrcode.setOriginalName(file.getOriginalFilename());
-        qrcode.setCreatedAt(LocalDateTime.now());
-        qrcodeRepository.save(qrcode);
+        SprMaterialDocument document = new SprMaterialDocument();
+        document.setUid(UUID.randomUUID());
+        document.setMaterial(material);
+        document.setDocumentName(documentName);
+        document.setFilePath(fileName);
+        document.setOriginalName(file.getOriginalFilename());
+        document.setCreatedAt(LocalDateTime.now());
+        documentRepository.save(document);
 
-        return new MaterialMediaDTO(
-                qrcode.getUid(), materialUid, fileName,
-                file.getOriginalFilename(),
-                getFileUrl(materialUid, fileName), null);
+        return new MaterialDocumentDTO(
+                document.getUid(),
+                materialUid,
+                document.getDocumentName(),
+                document.getFilePath(),
+                document.getOriginalName(),
+                getFileUrl(materialUid, fileName),
+                document.getCreatedAt());
     }
 
     @Transactional
-    public void deleteQrcode(UUID uid) {
-        SprMaterialQrcode qrcode = qrcodeRepository.findById(uid)
-                .orElseThrow(() -> new RuntimeException("QR-код не найден: " + uid));
-        deleteFile(qrcode.getMaterial().getUid(), qrcode.getFilePath());
-        qrcodeRepository.delete(qrcode);
+    public void deleteDocument(UUID uid) {
+        SprMaterialDocument document = documentRepository.findById(uid)
+                .orElseThrow(() -> new RuntimeException("Документ не найден: " + uid));
+        deleteFile(document.getMaterial().getUid(), document.getFilePath());
+        documentRepository.delete(document);
     }
+
+    // ==================== СПРАВОЧНИК ПОСТАВЩИКОВ ====================
+
+    public List<SprSupplierDTO> getSuppliers() {
+        return sprSupplierRepository.findAll().stream()
+                .map(s -> new SprSupplierDTO(s.getUid(), s.getName()))
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public SprSupplierDTO createSupplier(CreateSupplierRequest request) {
+        SprSupplier supplier = new SprSupplier();
+        supplier.setUid(UUID.randomUUID());
+        supplier.setName(request.getName());
+        sprSupplierRepository.save(supplier);
+        return new SprSupplierDTO(supplier.getUid(), supplier.getName());
+    }
+
+    @Transactional
+    public SprSupplierDTO updateSupplier(UUID uid, UpdateSupplierRequest request) {
+        SprSupplier supplier = sprSupplierRepository.findById(uid)
+                .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + uid));
+        if (request.getName() != null) supplier.setName(request.getName());
+        sprSupplierRepository.save(supplier);
+        return new SprSupplierDTO(supplier.getUid(), supplier.getName());
+    }
+
+    @Transactional
+    public void deleteSupplier(UUID uid) {
+        sprSupplierRepository.deleteById(uid);
+    }
+
+    // ==================== ПРИВЯЗКА ПОСТАВЩИКОВ К МАТЕРИАЛУ ====================
+
+    public List<MaterialSupplyDTO> getMaterialSupplies(UUID materialUid) {
+        return regSuppliersRepository.findByMaterialUid(materialUid).stream()
+                .map(r -> new MaterialSupplyDTO(
+                        r.getUid(),
+                        r.getMaterial() != null ? r.getMaterial().getUid() : materialUid,
+                        r.getSupplier() != null ? r.getSupplier().getUid() : null,
+                        r.getSupplier() != null ? r.getSupplier().getName() : null,
+                        r.getSupplyDate(),
+                        r.getDocumentName(),
+                        r.getFilePath(),
+                        r.getOriginalName(),
+                        r.getFilePath() != null ? getFileUrl(materialUid, r.getFilePath()) : null))
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public MaterialSupplyDTO addMaterialSupply(UUID materialUid, CreateSupplyRequest request, MultipartFile file) throws IOException {
+        SprMaterial material = materialRepository.findById(materialUid)
+                .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid));
+
+        SprSupplier supplier = sprSupplierRepository.findById(request.getSupplierUid())
+                .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + request.getSupplierUid()));
+
+        RegSuppliers regSuppliers = new RegSuppliers();
+        regSuppliers.setUid(UUID.randomUUID());
+        regSuppliers.setMaterial(material);
+        regSuppliers.setSupplier(supplier);
+        regSuppliers.setSupplyDate(request.getSupplyDate() != null ? request.getSupplyDate() : LocalDateTime.now());
+        regSuppliers.setDocumentName(request.getDocumentName());
+
+        if (file != null && !file.isEmpty()) {
+            String fileName = saveFile(materialUid, file);
+            regSuppliers.setFilePath(fileName);
+            regSuppliers.setOriginalName(file.getOriginalFilename());
+        }
+
+        regSuppliersRepository.save(regSuppliers);
+
+        return new MaterialSupplyDTO(
+                regSuppliers.getUid(),
+                materialUid,
+                supplier.getUid(),
+                supplier.getName(),
+                regSuppliers.getSupplyDate(),
+                regSuppliers.getDocumentName(),
+                regSuppliers.getFilePath(),
+                regSuppliers.getOriginalName(),
+                regSuppliers.getFilePath() != null ? getFileUrl(materialUid, regSuppliers.getFilePath()) : null);
+    }
+
+    @Transactional
+    public void deleteMaterialSupply(UUID supplyUid) {
+        RegSuppliers regSuppliers = regSuppliersRepository.findById(supplyUid).orElse(null);
+        if (regSuppliers != null && regSuppliers.getFilePath() != null) {
+            deleteFile(regSuppliers.getMaterial().getUid(), regSuppliers.getFilePath());
+        }
+        regSuppliersRepository.deleteById(supplyUid);
+    }
+
+    // ==================== АНАЛОГИ ====================
+
+    public List<MaterialAnalogDTO> getAnalogs(UUID materialUid) {
+        return regAnalogRepository.findByMaterialUid(materialUid).stream()
+                .map(a -> new MaterialAnalogDTO(
+                        a.getUid(),
+                        a.getMaterial().getUid(),
+                        a.getAnalogMaterial().getUid(),
+                        a.getAnalogMaterial().getNameMaterial(),
+                        a.getAnalogMaterial().getModelOfBrand() != null ? a.getAnalogMaterial().getModelOfBrand().getName() : null,
+                        a.getCompatibilityPercent(),
+                        a.getCreatedAt()))
+                .collect(Collectors.toList());
+    }
+
+    public CalculateCompatibilityResponse calculateCompatibility(UUID materialUid1, UUID materialUid2) {
+        SprMaterial m1 = materialRepository.findById(materialUid1)
+                .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid1));
+        SprMaterial m2 = materialRepository.findById(materialUid2)
+                .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid2));
+
+        boolean groupsMatch = true;
+        if (m1.getTypeMain() != null && m2.getTypeMain() != null) {
+            groupsMatch = groupsMatch && m1.getTypeMain().getUid().equals(m2.getTypeMain().getUid());
+        } else {
+            groupsMatch = false;
+        }
+        if (m1.getTypePurpose() != null && m2.getTypePurpose() != null) {
+            groupsMatch = groupsMatch && m1.getTypePurpose().getUid().equals(m2.getTypePurpose().getUid());
+        } else {
+            groupsMatch = false;
+        }
+        if (m1.getTypeProduct() != null && m2.getTypeProduct() != null) {
+            groupsMatch = groupsMatch && m1.getTypeProduct().getUid().equals(m2.getTypeProduct().getUid());
+        } else {
+            groupsMatch = false;
+        }
+
+        if (!groupsMatch) {
+            return new CalculateCompatibilityResponse(0, 0, 0, false);
+        }
+
+        List<RegAttributes> attrs1 = regAttributesRepository.findByMaterialUid(materialUid1);
+        List<RegAttributes> attrs2 = regAttributesRepository.findByMaterialUid(materialUid2);
+
+        List<RegAttributes> filledAttrs1 = attrs1.stream()
+                .filter(a -> a.getAttributeType() != null && a.getMeaning() != null && !a.getMeaning().isEmpty())
+                .collect(Collectors.toList());
+
+        if (filledAttrs1.isEmpty()) {
+            return new CalculateCompatibilityResponse(0, 0, 0, true);
+        }
+
+        int matched = 0;
+        for (RegAttributes a1 : filledAttrs1) {
+            for (RegAttributes a2 : attrs2) {
+                if (a2.getAttributeType() != null 
+                        && a1.getAttributeType().getUid().equals(a2.getAttributeType().getUid())
+                        && a1.getMeaning() != null && a1.getMeaning().equals(a2.getMeaning())) {
+                    matched++;
+                    break;
+                }
+            }
+        }
+
+        int percent = (int) Math.round((double) matched / filledAttrs1.size() * 100);
+
+        return new CalculateCompatibilityResponse(percent, filledAttrs1.size(), matched, true);
+    }
+
+    @Transactional
+    public MaterialAnalogDTO addAnalog(UUID materialUid, CreateAnalogRequest request) {
+        SprMaterial material = materialRepository.findById(materialUid)
+                .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid));
+
+        SprMaterial analogMaterial = materialRepository.findById(request.getAnalogMaterialUid())
+                .orElseThrow(() -> new RuntimeException("Материал-аналог не найден: " + request.getAnalogMaterialUid()));
+
+        RegAnalog analog = new RegAnalog();
+        analog.setUid(UUID.randomUUID());
+        analog.setMaterial(material);
+        analog.setAnalogMaterial(analogMaterial);
+        analog.setCompatibilityPercent(request.getCompatibilityPercent());
+        analog.setCreatedAt(LocalDateTime.now());
+        regAnalogRepository.save(analog);
+
+        return new MaterialAnalogDTO(
+                analog.getUid(),
+                materialUid,
+                analogMaterial.getUid(),
+                analogMaterial.getNameMaterial(),
+                analogMaterial.getModelOfBrand() != null ? analogMaterial.getModelOfBrand().getName() : null,
+                analog.getCompatibilityPercent(),
+                analog.getCreatedAt());
+    }
+
+    @Transactional
+    public void deleteAnalog(UUID analogUid) {
+        regAnalogRepository.deleteById(analogUid);
+    }
+
+    // ==================== РЕЙТИНГ ====================
+
+    public List<MaterialRatingDTO> getRatings(UUID materialUid) {
+        return regRatingRepository.findByMaterialUidOrderByCreatedAtDesc(materialUid).stream()
+                .map(r -> new MaterialRatingDTO(
+                        r.getUid(),
+                        r.getMaterial().getUid(),
+                        r.getRating(),
+                        r.getComment(),
+                        r.getAuthor(),
+                        r.getCreatedAt()))
+                .collect(Collectors.toList());
+    }
+
+    public Double getAverageRating(UUID materialUid) {
+        return regRatingRepository.getAverageRatingByMaterialUid(materialUid);
+    }
+
+    @Transactional
+    public MaterialRatingDTO addRating(UUID materialUid, AddRatingRequest request) {
+        SprMaterial material = materialRepository.findById(materialUid)
+                .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid));
+
+        RegRating rating = new RegRating();
+        rating.setUid(UUID.randomUUID());
+        rating.setMaterial(material);
+        rating.setRating(request.getRating());
+        rating.setComment(request.getComment());
+        rating.setAuthor(request.getAuthor());
+        rating.setCreatedAt(LocalDateTime.now());
+        regRatingRepository.save(rating);
+
+        return new MaterialRatingDTO(
+                rating.getUid(),
+                materialUid,
+                rating.getRating(),
+                rating.getComment(),
+                rating.getAuthor(),
+                rating.getCreatedAt());
+    }
+
+    @Transactional
+    public void deleteRating(UUID ratingUid) {
+        regRatingRepository.deleteById(ratingUid);
+    }
+
+    // ==================== ИНТЕГРАЦИЯ ====================
+
+    public List<MaterialIntegrationDTO> getIntegrations(UUID materialUid) {
+        return regIntegrationRepository.findByMaterialUidOrderByCreatedAtDesc(materialUid).stream()
+                .map(i -> new MaterialIntegrationDTO(
+                        i.getUid(),
+                        i.getMaterial().getUid(),
+                        i.getEvent(),
+                        i.getExchangeType(),
+                        i.getDirection(),
+                        i.getProtocol(),
+                        i.getTargetSystem(),
+                        i.getCreatedAt()))
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public MaterialIntegrationDTO addIntegration(UUID materialUid, CreateIntegrationRequest request) {
+        SprMaterial material = materialRepository.findById(materialUid)
+                .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid));
+
+        RegIntegration integration = new RegIntegration();
+        integration.setUid(UUID.randomUUID());
+        integration.setMaterial(material);
+        integration.setEvent("Объект синхронизирован");
+        integration.setExchangeType(request.getExchangeType());
+        integration.setDirection(request.getDirection());
+        integration.setProtocol(request.getProtocol());
+        integration.setTargetSystem(request.getTargetSystem());
+        integration.setCreatedAt(LocalDateTime.now());
+        regIntegrationRepository.save(integration);
+
+        return new MaterialIntegrationDTO(
+                integration.getUid(),
+                materialUid,
+                integration.getEvent(),
+                integration.getExchangeType(),
+                integration.getDirection(),
+                integration.getProtocol(),
+                integration.getTargetSystem(),
+                integration.getCreatedAt());
+    }
+
+    @Transactional
+    public void deleteIntegration(UUID integrationUid) {
+        regIntegrationRepository.deleteById(integrationUid);
+    }
+
+    // ==================== Удаление всех медиа ====================
 
     @Transactional
     public void deleteAllMaterialMedia(UUID materialUid) {
         imageRepository.deleteByMaterialUid(materialUid);
         blueprintRepository.deleteByMaterialUid(materialUid);
-        qrcodeRepository.deleteByMaterialUid(materialUid);
+        codeRepository.deleteByMaterialUid(materialUid);
+        documentRepository.deleteByMaterialUid(materialUid);
+        regSuppliersRepository.deleteByMaterialUid(materialUid);
+        regAnalogRepository.deleteByMaterialUid(materialUid);
+        regRatingRepository.deleteByMaterialUid(materialUid);
+        regIntegrationRepository.deleteByMaterialUid(materialUid);
 
         try {
             Path dir = Path.of(NOMENCLATURE_UPLOAD_DIR, materialUid.toString());
@@ -969,7 +1517,7 @@ public class NomenclatureService {
         doc.setPrice(request.getPrice());
         doc.setEntranceDate(request.getPriceDate() != null ? request.getPriceDate() : LocalDateTime.now());
         if (request.getSupplierUid() != null) {
-            doc.setSupplier(suppliersRepository.findById(request.getSupplierUid()).orElse(null));
+            doc.setSupplier(sprSupplierRepository.findById(request.getSupplierUid()).orElse(null));
         }
         docEntranceRepository.save(doc);
 
@@ -981,11 +1529,13 @@ public class NomenclatureService {
         price.setDocEntrance(doc);
         priceRepository.save(price);
 
+        String supplierName = doc.getSupplier() != null ? doc.getSupplier().getName() : null;
+
         return new MaterialPriceDTO(
                 price.getUid(),
                 price.getPrice(),
                 price.getPriceDate(),
-                doc.getSupplier() != null ? doc.getSupplier().getName() : null,
+                supplierName,
                 null,
                 null);
     }
