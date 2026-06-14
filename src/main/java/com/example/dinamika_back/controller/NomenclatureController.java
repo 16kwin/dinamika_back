@@ -31,7 +31,9 @@ public class NomenclatureController {
 
     @PostMapping("/draft")
     public ResponseEntity<Void> saveDraft(@RequestBody NomenclatureSaveRequest request) {
-        nomenclatureService.saveDraft(request);
+        // Автор берется из запроса, если нет — "Система"
+        String author = request.getAuthor() != null ? request.getAuthor() : "Система";
+        nomenclatureService.saveDraft(request, author);
         return ResponseEntity.ok().build();
     }
 
@@ -302,17 +304,19 @@ public class NomenclatureController {
     @PostMapping("/{materialUid}/images")
     public ResponseEntity<MaterialMediaDTO> uploadImage(
             @PathVariable UUID materialUid,
-            @RequestParam("file") MultipartFile file) {
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "author", defaultValue = "Система") String author) {
         try {
-            return ResponseEntity.ok(nomenclatureService.uploadImage(materialUid, file));
+            return ResponseEntity.ok(nomenclatureService.uploadImage(materialUid, file, author));
         } catch (IOException e) {
             return ResponseEntity.internalServerError().build();
         }
     }
 
     @DeleteMapping("/images/{uid}")
-    public ResponseEntity<Void> deleteImage(@PathVariable UUID uid) {
-        nomenclatureService.deleteImage(uid);
+    public ResponseEntity<Void> deleteImage(@PathVariable UUID uid,
+                                            @RequestParam(value = "author", defaultValue = "Система") String author) {
+        nomenclatureService.deleteImage(uid, author);
         return ResponseEntity.ok().build();
     }
 
@@ -326,17 +330,19 @@ public class NomenclatureController {
     @PostMapping("/{materialUid}/blueprints")
     public ResponseEntity<MaterialMediaDTO> uploadBlueprint(
             @PathVariable UUID materialUid,
-            @RequestParam("file") MultipartFile file) {
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "author", defaultValue = "Система") String author) {
         try {
-            return ResponseEntity.ok(nomenclatureService.uploadBlueprint(materialUid, file));
+            return ResponseEntity.ok(nomenclatureService.uploadBlueprint(materialUid, file, author));
         } catch (IOException e) {
             return ResponseEntity.internalServerError().build();
         }
     }
 
     @DeleteMapping("/blueprints/{uid}")
-    public ResponseEntity<Void> deleteBlueprint(@PathVariable UUID uid) {
-        nomenclatureService.deleteBlueprint(uid);
+    public ResponseEntity<Void> deleteBlueprint(@PathVariable UUID uid,
+                                                @RequestParam(value = "author", defaultValue = "Система") String author) {
+        nomenclatureService.deleteBlueprint(uid, author);
         return ResponseEntity.ok().build();
     }
 
@@ -358,17 +364,19 @@ public class NomenclatureController {
             @RequestParam(value = "codeType", defaultValue = "QR_CODE") String codeType,
             @RequestParam(value = "codeValue", required = false) String codeValue,
             @RequestParam(value = "codeKind", defaultValue = "QR") String codeKind,
-            @RequestParam(value = "file", required = false) MultipartFile file) {
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            @RequestParam(value = "author", defaultValue = "Система") String author) {
         try {
-            return ResponseEntity.ok(nomenclatureService.uploadCode(materialUid, codeType, codeValue, codeKind, file));
+            return ResponseEntity.ok(nomenclatureService.uploadCode(materialUid, codeType, codeValue, codeKind, file, author));
         } catch (IOException e) {
             return ResponseEntity.internalServerError().build();
         }
     }
 
     @DeleteMapping("/codes/{uid}")
-    public ResponseEntity<Void> deleteCode(@PathVariable UUID uid) {
-        nomenclatureService.deleteCode(uid);
+    public ResponseEntity<Void> deleteCode(@PathVariable UUID uid,
+                                           @RequestParam(value = "author", defaultValue = "Система") String author) {
+        nomenclatureService.deleteCode(uid, author);
         return ResponseEntity.ok().build();
     }
 
@@ -383,17 +391,19 @@ public class NomenclatureController {
     public ResponseEntity<MaterialDocumentDTO> uploadDocument(
             @PathVariable UUID materialUid,
             @RequestParam("documentName") String documentName,
-            @RequestParam("file") MultipartFile file) {
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "author", defaultValue = "Система") String author) {
         try {
-            return ResponseEntity.ok(nomenclatureService.uploadDocument(materialUid, documentName, file));
+            return ResponseEntity.ok(nomenclatureService.uploadDocument(materialUid, documentName, file, author));
         } catch (IOException e) {
             return ResponseEntity.internalServerError().build();
         }
     }
 
     @DeleteMapping("/documents/{uid}")
-    public ResponseEntity<Void> deleteDocument(@PathVariable UUID uid) {
-        nomenclatureService.deleteDocument(uid);
+    public ResponseEntity<Void> deleteDocument(@PathVariable UUID uid,
+                                               @RequestParam(value = "author", defaultValue = "Система") String author) {
+        nomenclatureService.deleteDocument(uid, author);
         return ResponseEntity.ok().build();
     }
 
@@ -435,21 +445,23 @@ public class NomenclatureController {
             @RequestParam("supplierUid") UUID supplierUid,
             @RequestParam(value = "supplyDate", required = false) String supplyDate,
             @RequestParam(value = "documentName", required = false) String documentName,
-            @RequestParam(value = "file", required = false) MultipartFile file) {
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            @RequestParam(value = "author", defaultValue = "Система") String author) {
         try {
             CreateSupplyRequest request = new CreateSupplyRequest();
             request.setSupplierUid(supplierUid);
             request.setSupplyDate(supplyDate != null ? LocalDateTime.parse(supplyDate) : null);
             request.setDocumentName(documentName);
-            return ResponseEntity.ok(nomenclatureService.addMaterialSupply(materialUid, request, file));
+            return ResponseEntity.ok(nomenclatureService.addMaterialSupply(materialUid, request, file, author));
         } catch (IOException e) {
             return ResponseEntity.internalServerError().build();
         }
     }
 
     @DeleteMapping("/supply/{uid}")
-    public ResponseEntity<Void> deleteMaterialSupply(@PathVariable UUID uid) {
-        nomenclatureService.deleteMaterialSupply(uid);
+    public ResponseEntity<Void> deleteMaterialSupply(@PathVariable UUID uid,
+                                                     @RequestParam(value = "author", defaultValue = "Система") String author) {
+        nomenclatureService.deleteMaterialSupply(uid, author);
         return ResponseEntity.ok().build();
     }
 
@@ -570,6 +582,13 @@ public class NomenclatureController {
     public ResponseEntity<Void> deleteCharacteristic(@PathVariable UUID uid) {
         nomenclatureService.deleteCharacteristic(uid);
         return ResponseEntity.ok().build();
+    }
+
+    // ==================== ЖУРНАЛ СОБЫТИЙ ====================
+
+    @GetMapping("/{materialUid}/events")
+    public ResponseEntity<List<EventLogDTO>> getEvents(@PathVariable UUID materialUid) {
+        return ResponseEntity.ok(nomenclatureService.getEvents(materialUid));
     }
 
     // ==================== Получение одного материала ====================

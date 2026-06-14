@@ -24,5 +24,5 @@ public class NomenclatureSaveRequest {
     private UUID brandUid;
     private UUID modelOfBrandUid;
     private UUID countryUid;
-    private String barcode;
+    private String author;
 }

@@ -36,7 +36,7 @@ public class NomenclatureService {
     private final SprMaterialCodeRepository codeRepository;
     private final SprMaterialDocumentRepository documentRepository;
     private final RegPriceRepository priceRepository;
-    private final SprSupplierRepository sprSupplierRepository;
+    private final SupplierService supplierService;
     private final DocEntranceRepository docEntranceRepository;
     private final RegAttributesRepository regAttributesRepository;
     private final SprTypeAttributesRepository typeAttributesRepository;
@@ -44,6 +44,7 @@ public class NomenclatureService {
     private final RegAnalogRepository regAnalogRepository;
     private final RegRatingRepository regRatingRepository;
     private final RegIntegrationRepository regIntegrationRepository;
+    private final RegEventLogRepository eventLogRepository;
 
     private static final String NOMENCLATURE_UPLOAD_DIR = "uploads/nomenclature/";
 
@@ -82,6 +83,61 @@ public class NomenclatureService {
 
     private String getFileUrl(UUID materialUid, String filePath) {
         return "/uploads/nomenclature/" + materialUid + "/" + filePath;
+    }
+
+    // ==================== ЛОГИРОВАНИЕ СОБЫТИЙ ====================
+
+    @Transactional
+    public void logEvent(UUID materialUid, String eventType, String description,
+                         String fieldName, String oldValue, String newValue, String author) {
+        SprMaterial material = materialRepository.findById(materialUid).orElse(null);
+        if (material == null) return;
+
+        RegEventLog log = RegEventLog.builder()
+                .uid(UUID.randomUUID())
+                .material(material)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        eventLogRepository.save(log);
+    }
+
+    public List<EventLogDTO> getEvents(UUID materialUid) {
+        return eventLogRepository.findByMaterialUidOrderByCreatedAtDesc(materialUid).stream()
+                .map(e -> EventLogDTO.builder()
+                        .uid(e.getUid())
+                        .materialUid(e.getMaterial().getUid())
+                        .eventType(e.getEventType())
+                        .eventDescription(e.getEventDescription())
+                        .fieldName(e.getFieldName())
+                        .oldValue(e.getOldValue())
+                        .newValue(e.getNewValue())
+                        .author(e.getAuthor())
+                        .source(e.getSource())
+                        .createdAt(e.getCreatedAt())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    private void logFieldChange(UUID materialUid, String fieldName, String oldValue, String newValue, String author) {
+        if (oldValue == null && newValue == null) return;
+        if (oldValue != null && oldValue.equals(newValue)) return;
+        if (oldValue == null && newValue != null) {
+            logEvent(materialUid, "UPDATE", "Значение поля '" + fieldName + "' установлено: " + newValue,
+                    fieldName, null, newValue, author);
+        } else if (newValue == null && oldValue != null) {
+            logEvent(materialUid, "UPDATE", "Значение поля '" + fieldName + "' очищено",
+                    fieldName, oldValue, null, author);
+        } else {
+            logEvent(materialUid, "UPDATE", "Значение поля '" + fieldName + "' изменено с '" + oldValue + "' на '" + newValue + "'",
+                    fieldName, oldValue, newValue, author);
+        }
     }
 
     // ==================== Получение материала ====================
@@ -169,7 +225,7 @@ public class NomenclatureService {
     // ==================== Сохранение ====================
 
     @Transactional
-    public void saveDraft(NomenclatureSaveRequest request) {
+    public void saveDraft(NomenclatureSaveRequest request, String author) {
         SprMaterial material = materialRepository.findById(request.getUid())
                 .orElseGet(() -> {
                     SprMaterial newMaterial = new SprMaterial();
@@ -179,6 +235,31 @@ public class NomenclatureService {
                 });
 
         boolean isNewMaterial = material.getNameMaterial() == null;
+
+        if (!isNewMaterial) {
+            logFieldChange(material.getUid(), "Наименование", material.getNameMaterial(), request.getName(), author);
+            logFieldChange(material.getUid(), "Артикул", material.getArticle(), request.getArticle(), author);
+            logFieldChange(material.getUid(), "Описание", material.getDescription(), request.getDescription(), author);
+
+            if (request.getGroupUid() != null && material.getGroupMaterial() != null
+                    && !request.getGroupUid().equals(material.getGroupMaterial().getUid())) {
+                String oldGroupName = material.getGroupMaterial().getGroupName();
+                RegGroupMaterial newGroup = groupMaterialRepository.findById(request.getGroupUid()).orElse(null);
+                String newGroupName = newGroup != null ? newGroup.getGroupName() : "";
+                logEvent(material.getUid(), "UPDATE", "Значение поля 'Каталог' изменено с '" + oldGroupName + "' на '" + newGroupName + "'",
+                        "Каталог", oldGroupName, newGroupName, author);
+            }
+
+            logFieldChange(material.getUid(), "Использование",
+                    material.getUsage() != null ? material.getUsage().toString() : null,
+                    request.getUsage() != null ? request.getUsage().toString() : null, author);
+            logFieldChange(material.getUid(), "Сдача в лом",
+                    material.getWasteMaterial() != null ? material.getWasteMaterial().toString() : null,
+                    request.getWasteMaterial() != null ? request.getWasteMaterial().toString() : null, author);
+            logFieldChange(material.getUid(), "Сдача на переточку",
+                    material.getRecycleMaterial() != null ? material.getRecycleMaterial().toString() : null,
+                    request.getRecycleMaterial() != null ? request.getRecycleMaterial().toString() : null, author);
+        }
 
         material.setNameMaterial(request.getName());
         material.setArticle(request.getArticle());
@@ -227,6 +308,7 @@ public class NomenclatureService {
         materialRepository.save(material);
 
         if (isNewMaterial) {
+            logEvent(material.getUid(), "CREATE", "Создание карточки", null, null, null, author);
             createDefaultCharacteristics(material.getUid());
         }
     }
@@ -237,9 +319,16 @@ public class NomenclatureService {
         SprMaterial material = materialRepository.findById(materialUid)
                 .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid));
 
+        List<RegAttributes> existingAttrs = regAttributesRepository.findByMaterialUid(materialUid);
+
         String[] defaultNames = {"Длина", "Ширина", "Высота", "Масса"};
-        
+
         for (String name : defaultNames) {
+            boolean exists = existingAttrs.stream()
+                    .anyMatch(a -> a.getAttributeType() != null && name.equals(a.getAttributeType().getName()));
+
+            if (exists) continue;
+
             SprTypeAttributes attrType = typeAttributesRepository.findAll().stream()
                     .filter(a -> name.equals(a.getName()))
                     .findFirst()
@@ -262,7 +351,7 @@ public class NomenclatureService {
 
     public List<MaterialCharacteristicDTO> getCharacteristics(UUID materialUid) {
         List<RegAttributes> attrs = regAttributesRepository.findByMaterialUid(materialUid);
-        
+
         return attrs.stream()
                 .map(a -> {
                     boolean isCustom = a.getAttributeType() == null;
@@ -290,14 +379,17 @@ public class NomenclatureService {
         regAttr.setUid(UUID.randomUUID());
         regAttr.setMaterial(material);
 
+        String charName = "";
         if (request.getAttributeTypeUid() != null) {
             SprTypeAttributes attrType = typeAttributesRepository.findById(request.getAttributeTypeUid())
                     .orElseThrow(() -> new RuntimeException("Тип атрибута не найден: " + request.getAttributeTypeUid()));
             regAttr.setAttributeType(attrType);
             regAttr.setMeaning(request.getValue());
+            charName = attrType.getName();
         } else {
             regAttr.setAttributeType(null);
             regAttr.setMeaning(request.getCustomName() + "::" + (request.getValue() != null ? request.getValue() : ""));
+            charName = request.getCustomName() != null ? request.getCustomName() : "Пользовательская";
         }
 
         if (request.getMeasureUid() != null) {
@@ -305,6 +397,9 @@ public class NomenclatureService {
         }
 
         regAttributesRepository.save(regAttr);
+
+        logEvent(materialUid, "ADD", "Добавлена характеристика '" + charName + "': " + (request.getValue() != null ? request.getValue() : ""),
+                "Характеристика", null, request.getValue(), "Система");
 
         return new MaterialCharacteristicDTO(
                 regAttr.getUid(),
@@ -324,6 +419,7 @@ public class NomenclatureService {
         RegAttributes attr = regAttributesRepository.findById(characteristicUid)
                 .orElseThrow(() -> new RuntimeException("Характеристика не найдена: " + characteristicUid));
 
+        String oldValue = attr.getMeaning();
         if (request.getValue() != null) {
             if (attr.getAttributeType() == null && attr.getMeaning() != null && attr.getMeaning().contains("::")) {
                 String customName = attr.getMeaning().split("::")[0];
@@ -339,15 +435,19 @@ public class NomenclatureService {
 
         regAttributesRepository.save(attr);
 
+        String charName = attr.getAttributeType() != null ? attr.getAttributeType().getName() : "Пользовательская";
+        logEvent(attr.getMaterial().getUid(), "UPDATE", "Значение характеристики '" + charName + "' изменено с '" + oldValue + "' на '" + request.getValue() + "'",
+                charName, oldValue, request.getValue(), "Система");
+
         return new MaterialCharacteristicDTO(
                 attr.getUid(),
                 attr.getMaterial() != null ? attr.getMaterial().getUid() : null,
                 attr.getAttributeType() != null ? attr.getAttributeType().getUid() : null,
                 attr.getAttributeType() != null ? attr.getAttributeType().getName() : null,
-                attr.getAttributeType() == null && attr.getMeaning() != null && attr.getMeaning().contains("::") 
-                    ? attr.getMeaning().split("::")[0] : null,
-                attr.getAttributeType() != null ? attr.getMeaning() : 
-                    (attr.getMeaning() != null && attr.getMeaning().contains("::") ? attr.getMeaning().split("::")[1] : attr.getMeaning()),
+                attr.getAttributeType() == null && attr.getMeaning() != null && attr.getMeaning().contains("::")
+                        ? attr.getMeaning().split("::")[0] : null,
+                attr.getAttributeType() != null ? attr.getMeaning() :
+                        (attr.getMeaning() != null && attr.getMeaning().contains("::") ? attr.getMeaning().split("::")[1] : attr.getMeaning()),
                 attr.getMeasure() != null ? attr.getMeasure().getUid() : null,
                 attr.getMeasure() != null ? attr.getMeasure().getName() : null,
                 attr.getAttributeType() == null
@@ -356,6 +456,12 @@ public class NomenclatureService {
 
     @Transactional
     public void deleteCharacteristic(UUID characteristicUid) {
+        RegAttributes attr = regAttributesRepository.findById(characteristicUid).orElse(null);
+        if (attr != null) {
+            String charName = attr.getAttributeType() != null ? attr.getAttributeType().getName() : "Пользовательская";
+            logEvent(attr.getMaterial().getUid(), "DELETE", "Удалена характеристика '" + charName + "'",
+                    "Характеристика", attr.getMeaning(), null, "Система");
+        }
         regAttributesRepository.deleteById(characteristicUid);
     }
 
@@ -970,7 +1076,7 @@ public class NomenclatureService {
     }
 
     @Transactional
-    public MaterialMediaDTO uploadImage(UUID materialUid, MultipartFile file) throws IOException {
+    public MaterialMediaDTO uploadImage(UUID materialUid, MultipartFile file, String author) throws IOException {
         String fileName = saveFile(materialUid, file);
 
         SprMaterial material = materialRepository.findById(materialUid)
@@ -985,6 +1091,9 @@ public class NomenclatureService {
         image.setCreatedAt(LocalDateTime.now());
         imageRepository.save(image);
 
+        logEvent(materialUid, "ADD", "Добавлено изображение '" + file.getOriginalFilename() + "'",
+                "Изображение", null, file.getOriginalFilename(), author);
+
         return new MaterialMediaDTO(
                 image.getUid(), materialUid, fileName,
                 file.getOriginalFilename(),
@@ -992,11 +1101,16 @@ public class NomenclatureService {
     }
 
     @Transactional
-    public void deleteImage(UUID uid) {
+    public void deleteImage(UUID uid, String author) {
         SprMaterialImage image = imageRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Изображение не найдено: " + uid));
-        deleteFile(image.getMaterial().getUid(), image.getFilePath());
+        UUID materialUid = image.getMaterial().getUid();
+        String fileName = image.getOriginalName();
+        deleteFile(materialUid, image.getFilePath());
         imageRepository.delete(image);
+
+        logEvent(materialUid, "DELETE", "Удалено изображение '" + fileName + "'",
+                "Изображение", fileName, null, author);
     }
 
     // ==================== ЧЕРТЕЖИ ====================
@@ -1014,7 +1128,7 @@ public class NomenclatureService {
     }
 
     @Transactional
-    public MaterialMediaDTO uploadBlueprint(UUID materialUid, MultipartFile file) throws IOException {
+    public MaterialMediaDTO uploadBlueprint(UUID materialUid, MultipartFile file, String author) throws IOException {
         String fileName = saveFile(materialUid, file);
 
         SprMaterial material = materialRepository.findById(materialUid)
@@ -1028,6 +1142,9 @@ public class NomenclatureService {
         blueprint.setCreatedAt(LocalDateTime.now());
         blueprintRepository.save(blueprint);
 
+        logEvent(materialUid, "ADD", "Добавлен чертеж '" + file.getOriginalFilename() + "'",
+                "Чертеж", null, file.getOriginalFilename(), author);
+
         return new MaterialMediaDTO(
                 blueprint.getUid(), materialUid, fileName,
                 file.getOriginalFilename(),
@@ -1035,11 +1152,16 @@ public class NomenclatureService {
     }
 
     @Transactional
-    public void deleteBlueprint(UUID uid) {
+    public void deleteBlueprint(UUID uid, String author) {
         SprMaterialBlueprint blueprint = blueprintRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Чертёж не найден: " + uid));
-        deleteFile(blueprint.getMaterial().getUid(), blueprint.getFilePath());
+        UUID materialUid = blueprint.getMaterial().getUid();
+        String fileName = blueprint.getOriginalName();
+        deleteFile(materialUid, blueprint.getFilePath());
         blueprintRepository.delete(blueprint);
+
+        logEvent(materialUid, "DELETE", "Удален чертеж '" + fileName + "'",
+                "Чертеж", fileName, null, author);
     }
 
     // ==================== КОДЫ (QR, BARCODE, SKU) ====================
@@ -1075,7 +1197,7 @@ public class NomenclatureService {
     }
 
     @Transactional
-    public MaterialCodeDTO uploadCode(UUID materialUid, String codeType, String codeValue, String codeKind, MultipartFile file) throws IOException {
+    public MaterialCodeDTO uploadCode(UUID materialUid, String codeType, String codeValue, String codeKind, MultipartFile file, String author) throws IOException {
         SprMaterial material = materialRepository.findById(materialUid)
                 .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid));
 
@@ -1095,6 +1217,10 @@ public class NomenclatureService {
         code.setCreatedAt(LocalDateTime.now());
         codeRepository.save(code);
 
+        String codeLabel = "BARCODE".equals(codeKind) ? "Штрих-код" : "SKU".equals(codeKind) ? "SKU" : "QR-код";
+        logEvent(materialUid, "ADD", "Добавлен " + codeLabel + " '" + codeValue + "'",
+                codeLabel, null, codeValue, author);
+
         return new MaterialCodeDTO(
                 code.getUid(),
                 materialUid,
@@ -1108,12 +1234,21 @@ public class NomenclatureService {
     }
 
     @Transactional
-    public void deleteCode(UUID codeUid) {
+    public void deleteCode(UUID codeUid, String author) {
         SprMaterialCode code = codeRepository.findById(codeUid).orElse(null);
-        if (code != null && code.getFilePath() != null) {
-            deleteFile(code.getMaterial().getUid(), code.getFilePath());
+        if (code != null) {
+            UUID materialUid = code.getMaterial().getUid();
+            String codeValue = code.getCodeValue();
+            String codeLabel = "BARCODE".equals(code.getCodeKind()) ? "Штрих-код" : "SKU".equals(code.getCodeKind()) ? "SKU" : "QR-код";
+            if (code.getFilePath() != null) {
+                deleteFile(materialUid, code.getFilePath());
+            }
+            codeRepository.deleteById(codeUid);
+            logEvent(materialUid, "DELETE", "Удален " + codeLabel + " '" + codeValue + "'",
+                    codeLabel, codeValue, null, author);
+        } else {
+            codeRepository.deleteById(codeUid);
         }
-        codeRepository.deleteById(codeUid);
     }
 
     // ==================== ДОКУМЕНТЫ ====================
@@ -1132,7 +1267,7 @@ public class NomenclatureService {
     }
 
     @Transactional
-    public MaterialDocumentDTO uploadDocument(UUID materialUid, String documentName, MultipartFile file) throws IOException {
+    public MaterialDocumentDTO uploadDocument(UUID materialUid, String documentName, MultipartFile file, String author) throws IOException {
         String fileName = saveFile(materialUid, file);
 
         SprMaterial material = materialRepository.findById(materialUid)
@@ -1147,6 +1282,9 @@ public class NomenclatureService {
         document.setCreatedAt(LocalDateTime.now());
         documentRepository.save(document);
 
+        logEvent(materialUid, "ADD", "Добавлен документ '" + documentName + "'",
+                "Документ", null, documentName, author);
+
         return new MaterialDocumentDTO(
                 document.getUid(),
                 materialUid,
@@ -1158,42 +1296,69 @@ public class NomenclatureService {
     }
 
     @Transactional
-    public void deleteDocument(UUID uid) {
+    public void deleteDocument(UUID uid, String author) {
         SprMaterialDocument document = documentRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Документ не найден: " + uid));
-        deleteFile(document.getMaterial().getUid(), document.getFilePath());
+        UUID materialUid = document.getMaterial().getUid();
+        String docName = document.getDocumentName();
+        deleteFile(materialUid, document.getFilePath());
         documentRepository.delete(document);
+
+        logEvent(materialUid, "DELETE", "Удален документ '" + docName + "'",
+                "Документ", docName, null, author);
     }
 
     // ==================== СПРАВОЧНИК ПОСТАВЩИКОВ ====================
 
     public List<SprSupplierDTO> getSuppliers() {
-        return sprSupplierRepository.findAll().stream()
-                .map(s -> new SprSupplierDTO(s.getUid(), s.getName()))
-                .collect(Collectors.toList());
+        return supplierService.getAllSuppliers();
     }
 
     @Transactional
     public SprSupplierDTO createSupplier(CreateSupplierRequest request) {
-        SprSupplier supplier = new SprSupplier();
-        supplier.setUid(UUID.randomUUID());
-        supplier.setName(request.getName());
-        sprSupplierRepository.save(supplier);
-        return new SprSupplierDTO(supplier.getUid(), supplier.getName());
+        SupplierCreateResponse response = supplierService.generateCode();
+        SupplierSaveRequest saveRequest = new SupplierSaveRequest();
+        saveRequest.setUid(response.getUid());
+        saveRequest.setCode(response.getCode());
+        saveRequest.setName(request.getName());
+        supplierService.saveDraft(saveRequest);
+        return supplierService.getSupplier(response.getUid());
     }
 
     @Transactional
     public SprSupplierDTO updateSupplier(UUID uid, UpdateSupplierRequest request) {
-        SprSupplier supplier = sprSupplierRepository.findById(uid)
-                .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + uid));
-        if (request.getName() != null) supplier.setName(request.getName());
-        sprSupplierRepository.save(supplier);
-        return new SprSupplierDTO(supplier.getUid(), supplier.getName());
+        SprSupplierDTO existing = supplierService.getSupplier(uid);
+        SupplierSaveRequest saveRequest = new SupplierSaveRequest();
+        saveRequest.setUid(uid);
+        saveRequest.setCode(existing.getCode());
+        saveRequest.setName(request.getName());
+        saveRequest.setCountryUid(existing.getCountryUid());
+        saveRequest.setAddress(existing.getAddress());
+        saveRequest.setShortDescriptionUid(existing.getShortDescriptionUid());
+        saveRequest.setDescription(existing.getDescription());
+        saveRequest.setEmail(existing.getEmail());
+        saveRequest.setWebsite(existing.getWebsite());
+        saveRequest.setPhone(existing.getPhone());
+        saveRequest.setBrandUid(existing.getBrandUid());
+        saveRequest.setInn(existing.getInn());
+        saveRequest.setOgrn(existing.getOgrn());
+        saveRequest.setKpp(existing.getKpp());
+        saveRequest.setContactPerson(existing.getContactPerson());
+        saveRequest.setContactPosition(existing.getContactPosition());
+        saveRequest.setContactPhone(existing.getContactPhone());
+        saveRequest.setDirector(existing.getDirector());
+        saveRequest.setDirectorPosition(existing.getDirectorPosition());
+        saveRequest.setBankName(existing.getBankName());
+        saveRequest.setBik(existing.getBik());
+        saveRequest.setCorrespondentAccount(existing.getCorrespondentAccount());
+        saveRequest.setSettlementAccount(existing.getSettlementAccount());
+        supplierService.saveDraft(saveRequest);
+        return supplierService.getSupplier(uid);
     }
 
     @Transactional
     public void deleteSupplier(UUID uid) {
-        sprSupplierRepository.deleteById(uid);
+        supplierService.deleteSupplier(uid);
     }
 
     // ==================== ПРИВЯЗКА ПОСТАВЩИКОВ К МАТЕРИАЛУ ====================
@@ -1214,12 +1379,14 @@ public class NomenclatureService {
     }
 
     @Transactional
-    public MaterialSupplyDTO addMaterialSupply(UUID materialUid, CreateSupplyRequest request, MultipartFile file) throws IOException {
+    public MaterialSupplyDTO addMaterialSupply(UUID materialUid, CreateSupplyRequest request, MultipartFile file, String author) throws IOException {
         SprMaterial material = materialRepository.findById(materialUid)
                 .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid));
 
-        SprSupplier supplier = sprSupplierRepository.findById(request.getSupplierUid())
-                .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + request.getSupplierUid()));
+        SprSupplierDTO supplierDTO = supplierService.getSupplier(request.getSupplierUid());
+        SprSupplier supplier = new SprSupplier();
+        supplier.setUid(supplierDTO.getUid());
+        supplier.setName(supplierDTO.getName());
 
         RegSuppliers regSuppliers = new RegSuppliers();
         regSuppliers.setUid(UUID.randomUUID());
@@ -1236,6 +1403,9 @@ public class NomenclatureService {
 
         regSuppliersRepository.save(regSuppliers);
 
+        logEvent(materialUid, "ADD", "Добавлен поставщик '" + supplier.getName() + "'",
+                "Поставщик", null, supplier.getName(), author);
+
         return new MaterialSupplyDTO(
                 regSuppliers.getUid(),
                 materialUid,
@@ -1249,12 +1419,20 @@ public class NomenclatureService {
     }
 
     @Transactional
-    public void deleteMaterialSupply(UUID supplyUid) {
+    public void deleteMaterialSupply(UUID supplyUid, String author) {
         RegSuppliers regSuppliers = regSuppliersRepository.findById(supplyUid).orElse(null);
-        if (regSuppliers != null && regSuppliers.getFilePath() != null) {
-            deleteFile(regSuppliers.getMaterial().getUid(), regSuppliers.getFilePath());
+        if (regSuppliers != null) {
+            UUID materialUid = regSuppliers.getMaterial().getUid();
+            String supplierName = regSuppliers.getSupplier() != null ? regSuppliers.getSupplier().getName() : "";
+            if (regSuppliers.getFilePath() != null) {
+                deleteFile(materialUid, regSuppliers.getFilePath());
+            }
+            regSuppliersRepository.deleteById(supplyUid);
+            logEvent(materialUid, "DELETE", "Удален поставщик '" + supplierName + "'",
+                    "Поставщик", supplierName, null, author);
+        } else {
+            regSuppliersRepository.deleteById(supplyUid);
         }
-        regSuppliersRepository.deleteById(supplyUid);
     }
 
     // ==================== АНАЛОГИ ====================
@@ -1313,7 +1491,7 @@ public class NomenclatureService {
         int matched = 0;
         for (RegAttributes a1 : filledAttrs1) {
             for (RegAttributes a2 : attrs2) {
-                if (a2.getAttributeType() != null 
+                if (a2.getAttributeType() != null
                         && a1.getAttributeType().getUid().equals(a2.getAttributeType().getUid())
                         && a1.getMeaning() != null && a1.getMeaning().equals(a2.getMeaning())) {
                     matched++;
@@ -1343,6 +1521,9 @@ public class NomenclatureService {
         analog.setCreatedAt(LocalDateTime.now());
         regAnalogRepository.save(analog);
 
+        logEvent(materialUid, "ADD", "Добавлен аналог '" + analogMaterial.getNameMaterial() + "'",
+                "Аналог", null, analogMaterial.getNameMaterial(), "Система");
+
         return new MaterialAnalogDTO(
                 analog.getUid(),
                 materialUid,
@@ -1355,6 +1536,12 @@ public class NomenclatureService {
 
     @Transactional
     public void deleteAnalog(UUID analogUid) {
+        RegAnalog analog = regAnalogRepository.findById(analogUid).orElse(null);
+        if (analog != null) {
+            String analogName = analog.getAnalogMaterial() != null ? analog.getAnalogMaterial().getNameMaterial() : "";
+            logEvent(analog.getMaterial().getUid(), "DELETE", "Удален аналог '" + analogName + "'",
+                    "Аналог", analogName, null, "Система");
+        }
         regAnalogRepository.deleteById(analogUid);
     }
 
@@ -1390,6 +1577,9 @@ public class NomenclatureService {
         rating.setCreatedAt(LocalDateTime.now());
         regRatingRepository.save(rating);
 
+        logEvent(materialUid, "ADD", "Добавлен отзыв от '" + request.getAuthor() + "': " + request.getRating() + " звезд",
+                "Рейтинг", null, request.getRating().toString(), request.getAuthor());
+
         return new MaterialRatingDTO(
                 rating.getUid(),
                 materialUid,
@@ -1401,6 +1591,11 @@ public class NomenclatureService {
 
     @Transactional
     public void deleteRating(UUID ratingUid) {
+        RegRating rating = regRatingRepository.findById(ratingUid).orElse(null);
+        if (rating != null) {
+            logEvent(rating.getMaterial().getUid(), "DELETE", "Удален отзыв от '" + rating.getAuthor() + "'",
+                    "Рейтинг", rating.getRating().toString(), null, rating.getAuthor());
+        }
         regRatingRepository.deleteById(ratingUid);
     }
 
@@ -1517,7 +1712,11 @@ public class NomenclatureService {
         doc.setPrice(request.getPrice());
         doc.setEntranceDate(request.getPriceDate() != null ? request.getPriceDate() : LocalDateTime.now());
         if (request.getSupplierUid() != null) {
-            doc.setSupplier(sprSupplierRepository.findById(request.getSupplierUid()).orElse(null));
+            SprSupplierDTO supplierDTO = supplierService.getSupplier(request.getSupplierUid());
+            SprSupplier sprSupplier = new SprSupplier();
+            sprSupplier.setUid(supplierDTO.getUid());
+            sprSupplier.setName(supplierDTO.getName());
+            doc.setSupplier(sprSupplier);
         }
         docEntranceRepository.save(doc);
 
@@ -1530,6 +1729,8 @@ public class NomenclatureService {
         priceRepository.save(price);
 
         String supplierName = doc.getSupplier() != null ? doc.getSupplier().getName() : null;
+        logEvent(materialUid, "ADD", "Добавлена цена: " + request.getPrice() + (supplierName != null ? " (поставщик: " + supplierName + ")" : ""),
+                "Цена", null, request.getPrice().toString(), "Система");
 
         return new MaterialPriceDTO(
                 price.getUid(),
@@ -1543,8 +1744,12 @@ public class NomenclatureService {
     @Transactional
     public void deletePrice(UUID priceUid) {
         RegPrice price = priceRepository.findById(priceUid).orElse(null);
-        if (price != null && price.getDocEntrance() != null) {
-            docEntranceRepository.delete(price.getDocEntrance());
+        if (price != null) {
+            logEvent(price.getMaterial().getUid(), "DELETE", "Удалена цена: " + price.getPrice(),
+                    "Цена", price.getPrice().toString(), null, "Система");
+            if (price.getDocEntrance() != null) {
+                docEntranceRepository.delete(price.getDocEntrance());
+            }
         }
         priceRepository.deleteById(priceUid);
     }
