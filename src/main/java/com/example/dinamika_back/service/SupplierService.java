@@ -1,4 +1,4 @@
-// SupplierService.java — ПОЛНЫЙ ФАЙЛ
+// SupplierService.java — ПОЛНЫЙ ФАЙЛ (добавлены поставки)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -29,6 +29,9 @@ public class SupplierService {
     private final SprSupplierDocumentRepository documentRepository;
     private final RegSupplierRatingRepository ratingRepository;
     private final RegSupplierIntegrationRepository integrationRepository;
+    private final RegSupplierEventLogRepository eventLogRepository;
+    private final RegSuppliersRepository regSuppliersRepository;
+    private final SprMaterialRepository materialRepository;
 
     private static final String SUPPLIER_UPLOAD_DIR = "uploads/suppliers/";
 
@@ -82,7 +85,6 @@ public class SupplierService {
     public SprSupplierDTO getSupplier(UUID uid) {
         SprSupplier supplier = supplierRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + uid));
-
         return toDTO(supplier);
     }
 
@@ -94,6 +96,61 @@ public class SupplierService {
                 .collect(Collectors.toList());
     }
 
+    // ==================== ЛОГИРОВАНИЕ СОБЫТИЙ ====================
+
+    @Transactional
+    public void logEvent(UUID supplierUid, String eventType, String description,
+                         String fieldName, String oldValue, String newValue, String author) {
+        SprSupplier supplier = supplierRepository.findById(supplierUid).orElse(null);
+        if (supplier == null) return;
+
+        RegSupplierEventLog log = RegSupplierEventLog.builder()
+                .uid(UUID.randomUUID())
+                .supplier(supplier)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        eventLogRepository.save(log);
+    }
+
+    public List<SupplierEventLogDTO> getEvents(UUID supplierUid) {
+        return eventLogRepository.findBySupplierUidOrderByCreatedAtDesc(supplierUid).stream()
+                .map(e -> SupplierEventLogDTO.builder()
+                        .uid(e.getUid())
+                        .supplierUid(e.getSupplier().getUid())
+                        .eventType(e.getEventType())
+                        .eventDescription(e.getEventDescription())
+                        .fieldName(e.getFieldName())
+                        .oldValue(e.getOldValue())
+                        .newValue(e.getNewValue())
+                        .author(e.getAuthor())
+                        .source(e.getSource())
+                        .createdAt(e.getCreatedAt())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    private void logFieldChange(UUID supplierUid, String fieldName, String oldValue, String newValue, String author) {
+        if (oldValue == null && newValue == null) return;
+        if (oldValue != null && oldValue.equals(newValue)) return;
+        if (oldValue == null && newValue != null) {
+            logEvent(supplierUid, "UPDATE", "Значение поля '" + fieldName + "' установлено: " + newValue,
+                    fieldName, null, newValue, author);
+        } else if (newValue == null && oldValue != null) {
+            logEvent(supplierUid, "UPDATE", "Значение поля '" + fieldName + "' очищено",
+                    fieldName, oldValue, null, author);
+        } else {
+            logEvent(supplierUid, "UPDATE", "Значение поля '" + fieldName + "' изменено с '" + oldValue + "' на '" + newValue + "'",
+                    fieldName, oldValue, newValue, author);
+        }
+    }
+
     // ==================== Сохранение ====================
 
     @Transactional
@@ -102,9 +159,43 @@ public class SupplierService {
                 .orElseGet(() -> {
                     SprSupplier newSupplier = new SprSupplier();
                     newSupplier.setUid(request.getUid());
-                    newSupplier.setCode(request.getCode());
+                    if (request.getCode() == null) {
+                        Integer maxCode = supplierRepository.findMaxCode();
+                        newSupplier.setCode(maxCode != null ? maxCode + 1 : 1);
+                    } else {
+                        newSupplier.setCode(request.getCode());
+                    }
                     return newSupplier;
                 });
+
+        if (supplier.getCode() == null) {
+            Integer maxCode = supplierRepository.findMaxCode();
+            supplier.setCode(maxCode != null ? maxCode + 1 : 1);
+        }
+
+        boolean isNewSupplier = supplier.getName() == null;
+        String author = request.getAuthor() != null ? request.getAuthor() : "Система";
+
+        if (!isNewSupplier) {
+            logFieldChange(supplier.getUid(), "Наименование", supplier.getName(), request.getName(), author);
+            logFieldChange(supplier.getUid(), "Адрес", supplier.getAddress(), request.getAddress(), author);
+            logFieldChange(supplier.getUid(), "Описание", supplier.getDescription(), request.getDescription(), author);
+            logFieldChange(supplier.getUid(), "Email", supplier.getEmail(), request.getEmail(), author);
+            logFieldChange(supplier.getUid(), "Сайт", supplier.getWebsite(), request.getWebsite(), author);
+            logFieldChange(supplier.getUid(), "Телефон", supplier.getPhone(), request.getPhone(), author);
+            logFieldChange(supplier.getUid(), "ИНН", supplier.getInn(), request.getInn(), author);
+            logFieldChange(supplier.getUid(), "ОГРН", supplier.getOgrn(), request.getOgrn(), author);
+            logFieldChange(supplier.getUid(), "КПП", supplier.getKpp(), request.getKpp(), author);
+            logFieldChange(supplier.getUid(), "Контактное лицо", supplier.getContactPerson(), request.getContactPerson(), author);
+            logFieldChange(supplier.getUid(), "Должность контактного лица", supplier.getContactPosition(), request.getContactPosition(), author);
+            logFieldChange(supplier.getUid(), "Телефон контактного лица", supplier.getContactPhone(), request.getContactPhone(), author);
+            logFieldChange(supplier.getUid(), "Руководитель", supplier.getDirector(), request.getDirector(), author);
+            logFieldChange(supplier.getUid(), "Должность руководителя", supplier.getDirectorPosition(), request.getDirectorPosition(), author);
+            logFieldChange(supplier.getUid(), "Банк", supplier.getBankName(), request.getBankName(), author);
+            logFieldChange(supplier.getUid(), "БИК", supplier.getBik(), request.getBik(), author);
+            logFieldChange(supplier.getUid(), "Корр. счет", supplier.getCorrespondentAccount(), request.getCorrespondentAccount(), author);
+            logFieldChange(supplier.getUid(), "Расч. счет", supplier.getSettlementAccount(), request.getSettlementAccount(), author);
+        }
 
         supplier.setName(request.getName());
         supplier.setAddress(request.getAddress());
@@ -136,6 +227,10 @@ public class SupplierService {
         }
 
         supplierRepository.save(supplier);
+
+        if (isNewSupplier) {
+            logEvent(supplier.getUid(), "CREATE", "Создание карточки поставщика", null, null, null, author);
+        }
     }
 
     // ==================== Удаление ====================
@@ -163,22 +258,21 @@ public class SupplierService {
     @Transactional
     public SupplierMediaDTO uploadImage(UUID supplierUid, MultipartFile file) throws IOException {
         String fileName = saveFile(supplierUid, file);
-
         SprSupplier supplier = supplierRepository.findById(supplierUid)
                 .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + supplierUid));
-
+        long count = imageRepository.findBySupplierUidOrderBySortOrderAsc(supplierUid).size();
+        int nextSortOrder = (int) count;
         SprSupplierImage image = new SprSupplierImage();
         image.setUid(UUID.randomUUID());
         image.setSupplier(supplier);
         image.setFilePath(fileName);
         image.setOriginalName(file.getOriginalFilename());
-        image.setSortOrder(0);
+        image.setSortOrder(nextSortOrder);
         imageRepository.save(image);
-
-        return new SupplierMediaDTO(
-                image.getUid(), supplierUid, fileName,
-                file.getOriginalFilename(),
-                getFileUrl(supplierUid, fileName), 0);
+        logEvent(supplierUid, "ADD", "Добавлено изображение '" + file.getOriginalFilename() + "'",
+                "Изображение", null, file.getOriginalFilename(), "Система");
+        return new SupplierMediaDTO(image.getUid(), supplierUid, fileName, file.getOriginalFilename(),
+                getFileUrl(supplierUid, fileName), nextSortOrder);
     }
 
     @Transactional
@@ -186,32 +280,28 @@ public class SupplierService {
         SprSupplierImage image = imageRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Изображение не найдено: " + uid));
         UUID supplierUid = image.getSupplier().getUid();
+        String fileName = image.getOriginalName();
         deleteFile(supplierUid, image.getFilePath());
         imageRepository.delete(image);
+        logEvent(supplierUid, "DELETE", "Удалено изображение '" + fileName + "'",
+                "Изображение", fileName, null, "Система");
     }
 
     // ==================== ДОКУМЕНТЫ ====================
 
     public List<SupplierDocumentDTO> getDocuments(UUID supplierUid) {
         return documentRepository.findBySupplierUidOrderByCreatedAtDesc(supplierUid).stream()
-                .map(doc -> new SupplierDocumentDTO(
-                        doc.getUid(),
-                        doc.getSupplier().getUid(),
-                        doc.getDocumentName(),
-                        doc.getFilePath(),
-                        doc.getOriginalName(),
-                        getFileUrl(supplierUid, doc.getFilePath()),
-                        doc.getCreatedAt()))
+                .map(doc -> new SupplierDocumentDTO(doc.getUid(), doc.getSupplier().getUid(),
+                        doc.getDocumentName(), doc.getFilePath(), doc.getOriginalName(),
+                        getFileUrl(supplierUid, doc.getFilePath()), doc.getCreatedAt()))
                 .collect(Collectors.toList());
     }
 
     @Transactional
     public SupplierDocumentDTO uploadDocument(UUID supplierUid, String documentName, MultipartFile file) throws IOException {
         String fileName = saveFile(supplierUid, file);
-
         SprSupplier supplier = supplierRepository.findById(supplierUid)
                 .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + supplierUid));
-
         SprSupplierDocument document = new SprSupplierDocument();
         document.setUid(UUID.randomUUID());
         document.setSupplier(supplier);
@@ -219,15 +309,11 @@ public class SupplierService {
         document.setFilePath(fileName);
         document.setOriginalName(file.getOriginalFilename());
         documentRepository.save(document);
-
-        return new SupplierDocumentDTO(
-                document.getUid(),
-                supplierUid,
-                document.getDocumentName(),
-                document.getFilePath(),
-                document.getOriginalName(),
-                getFileUrl(supplierUid, fileName),
-                document.getCreatedAt());
+        logEvent(supplierUid, "ADD", "Добавлен документ '" + documentName + "'",
+                "Документ", null, documentName, "Система");
+        return new SupplierDocumentDTO(document.getUid(), supplierUid, document.getDocumentName(),
+                document.getFilePath(), document.getOriginalName(),
+                getFileUrl(supplierUid, fileName), document.getCreatedAt());
     }
 
     @Transactional
@@ -235,21 +321,19 @@ public class SupplierService {
         SprSupplierDocument document = documentRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Документ не найден: " + uid));
         UUID supplierUid = document.getSupplier().getUid();
+        String docName = document.getDocumentName();
         deleteFile(supplierUid, document.getFilePath());
         documentRepository.delete(document);
+        logEvent(supplierUid, "DELETE", "Удален документ '" + docName + "'",
+                "Документ", docName, null, "Система");
     }
 
     // ==================== РЕЙТИНГ ====================
 
     public List<SupplierRatingDTO> getRatings(UUID supplierUid) {
         return ratingRepository.findBySupplierUidOrderByCreatedAtDesc(supplierUid).stream()
-                .map(r -> new SupplierRatingDTO(
-                        r.getUid(),
-                        r.getSupplier().getUid(),
-                        r.getRating(),
-                        r.getComment(),
-                        r.getAuthor(),
-                        r.getCreatedAt()))
+                .map(r -> new SupplierRatingDTO(r.getUid(), r.getSupplier().getUid(), r.getRating(),
+                        r.getComment(), r.getAuthor(), r.getCreatedAt()))
                 .collect(Collectors.toList());
     }
 
@@ -261,7 +345,6 @@ public class SupplierService {
     public SupplierRatingDTO addRating(UUID supplierUid, AddSupplierRatingRequest request) {
         SprSupplier supplier = supplierRepository.findById(supplierUid)
                 .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + supplierUid));
-
         RegSupplierRating rating = new RegSupplierRating();
         rating.setUid(UUID.randomUUID());
         rating.setSupplier(supplier);
@@ -269,18 +352,19 @@ public class SupplierService {
         rating.setComment(request.getComment());
         rating.setAuthor(request.getAuthor());
         ratingRepository.save(rating);
-
-        return new SupplierRatingDTO(
-                rating.getUid(),
-                supplierUid,
-                rating.getRating(),
-                rating.getComment(),
-                rating.getAuthor(),
-                rating.getCreatedAt());
+        logEvent(supplierUid, "ADD", "Добавлен отзыв от '" + request.getAuthor() + "': " + request.getRating() + " звезд",
+                "Рейтинг", null, request.getRating().toString(), request.getAuthor());
+        return new SupplierRatingDTO(rating.getUid(), supplierUid, rating.getRating(),
+                rating.getComment(), rating.getAuthor(), rating.getCreatedAt());
     }
 
     @Transactional
     public void deleteRating(UUID ratingUid) {
+        RegSupplierRating rating = ratingRepository.findById(ratingUid).orElse(null);
+        if (rating != null) {
+            logEvent(rating.getSupplier().getUid(), "DELETE", "Удален отзыв от '" + rating.getAuthor() + "'",
+                    "Рейтинг", rating.getRating().toString(), null, rating.getAuthor());
+        }
         ratingRepository.deleteById(ratingUid);
     }
 
@@ -288,15 +372,8 @@ public class SupplierService {
 
     public List<SupplierIntegrationDTO> getIntegrations(UUID supplierUid) {
         return integrationRepository.findBySupplierUidOrderByCreatedAtDesc(supplierUid).stream()
-                .map(i -> new SupplierIntegrationDTO(
-                        i.getUid(),
-                        i.getSupplier().getUid(),
-                        i.getEvent(),
-                        i.getExchangeType(),
-                        i.getDirection(),
-                        i.getProtocol(),
-                        i.getTargetSystem(),
-                        i.getCreatedAt()))
+                .map(i -> new SupplierIntegrationDTO(i.getUid(), i.getSupplier().getUid(), i.getEvent(),
+                        i.getExchangeType(), i.getDirection(), i.getProtocol(), i.getTargetSystem(), i.getCreatedAt()))
                 .collect(Collectors.toList());
     }
 
@@ -304,7 +381,6 @@ public class SupplierService {
     public SupplierIntegrationDTO addIntegration(UUID supplierUid, CreateSupplierIntegrationRequest request) {
         SprSupplier supplier = supplierRepository.findById(supplierUid)
                 .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + supplierUid));
-
         RegSupplierIntegration integration = new RegSupplierIntegration();
         integration.setUid(UUID.randomUUID());
         integration.setSupplier(supplier);
@@ -314,16 +390,9 @@ public class SupplierService {
         integration.setProtocol(request.getProtocol());
         integration.setTargetSystem(request.getTargetSystem());
         integrationRepository.save(integration);
-
-        return new SupplierIntegrationDTO(
-                integration.getUid(),
-                supplierUid,
-                integration.getEvent(),
-                integration.getExchangeType(),
-                integration.getDirection(),
-                integration.getProtocol(),
-                integration.getTargetSystem(),
-                integration.getCreatedAt());
+        return new SupplierIntegrationDTO(integration.getUid(), supplierUid, integration.getEvent(),
+                integration.getExchangeType(), integration.getDirection(), integration.getProtocol(),
+                integration.getTargetSystem(), integration.getCreatedAt());
     }
 
     @Transactional
@@ -339,6 +408,98 @@ public class SupplierService {
                 .collect(Collectors.toList());
     }
 
+    // ==================== ПОСТАВКИ ====================
+
+    public List<MaterialSupplyDTO> getDeliveries(UUID supplierUid) {
+        return regSuppliersRepository.findBySupplierUid(supplierUid).stream()
+                .map(r -> new MaterialSupplyDTO(
+                        r.getUid(),
+                        r.getMaterial() != null ? r.getMaterial().getUid() : null,
+                        r.getSupplier() != null ? r.getSupplier().getUid() : null,
+                        r.getSupplier() != null ? r.getSupplier().getName() : null,
+                        r.getSupplyDate(),
+                        r.getDocumentName(),
+                        r.getFilePath(),
+                        r.getOriginalName(),
+                        r.getFilePath() != null ? getFileUrl(supplierUid, r.getFilePath()) : null))
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public MaterialSupplyDTO addDelivery(UUID supplierUid, UUID materialUid, String supplyDate,
+                                         String documentName, MultipartFile file) throws IOException {
+        SprSupplier supplier = supplierRepository.findById(supplierUid)
+                .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + supplierUid));
+        SprMaterial material = materialRepository.findById(materialUid)
+                .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid));
+
+        RegSuppliers regSuppliers = new RegSuppliers();
+        regSuppliers.setUid(UUID.randomUUID());
+        regSuppliers.setMaterial(material);
+        regSuppliers.setSupplier(supplier);
+        regSuppliers.setSupplyDate(supplyDate != null ? LocalDateTime.parse(supplyDate) : LocalDateTime.now());
+        regSuppliers.setDocumentName(documentName);
+
+        if (file != null && !file.isEmpty()) {
+            String fileName = saveFile(supplierUid, file);
+            regSuppliers.setFilePath(fileName);
+            regSuppliers.setOriginalName(file.getOriginalFilename());
+        }
+
+        regSuppliersRepository.save(regSuppliers);
+
+        logEvent(supplierUid, "ADD", "Добавлена поставка материала '" + material.getNameMaterial() + "'",
+                "Поставка", null, material.getNameMaterial(), "Система");
+
+        return new MaterialSupplyDTO(
+                regSuppliers.getUid(),
+                material.getUid(),
+                supplier.getUid(),
+                supplier.getName(),
+                regSuppliers.getSupplyDate(),
+                regSuppliers.getDocumentName(),
+                regSuppliers.getFilePath(),
+                regSuppliers.getOriginalName(),
+                regSuppliers.getFilePath() != null ? getFileUrl(supplierUid, regSuppliers.getFilePath()) : null);
+    }
+
+    @Transactional
+    public void deleteDelivery(UUID uid) {
+        RegSuppliers regSuppliers = regSuppliersRepository.findById(uid).orElse(null);
+        if (regSuppliers != null) {
+            UUID supplierUid = regSuppliers.getSupplier().getUid();
+            String materialName = regSuppliers.getMaterial() != null ? regSuppliers.getMaterial().getNameMaterial() : "";
+            if (regSuppliers.getFilePath() != null) {
+                deleteFile(supplierUid, regSuppliers.getFilePath());
+            }
+            regSuppliersRepository.deleteById(uid);
+            logEvent(supplierUid, "DELETE", "Удалена поставка материала '" + materialName + "'",
+                    "Поставка", materialName, null, "Система");
+        } else {
+            regSuppliersRepository.deleteById(uid);
+        }
+    }
+
+    // ==================== АССОРТИМЕНТ ====================
+
+    public List<MaterialItemDTO> getAssortment(UUID supplierUid) {
+        List<RegSuppliers> supplies = regSuppliersRepository.findBySupplierUid(supplierUid);
+        return supplies.stream()
+                .filter(s -> s.getMaterial() != null)
+                .map(s -> {
+                    SprMaterial m = s.getMaterial();
+                    MaterialItemDTO item = new MaterialItemDTO();
+                    item.setUid(m.getUid());
+                    item.setName(m.getNameMaterial());
+                    item.setArticle(m.getArticle());
+                    item.setCode(m.getCodeMaterial());
+                    item.setTypeMainName(m.getTypeMain() != null ? m.getTypeMain().getTypeName() : null);
+                    return item;
+                })
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
     // ==================== Удаление всех медиа ====================
 
     @Transactional
@@ -347,54 +508,36 @@ public class SupplierService {
         documentRepository.deleteBySupplierUid(supplierUid);
         ratingRepository.deleteBySupplierUid(supplierUid);
         integrationRepository.deleteBySupplierUid(supplierUid);
-
         try {
             Path dir = Path.of(SUPPLIER_UPLOAD_DIR, supplierUid.toString());
             if (Files.exists(dir)) {
                 try (var files = Files.list(dir)) {
-                    files.forEach(f -> {
-                        try { Files.deleteIfExists(f); } catch (IOException ignored) {}
-                    });
+                    files.forEach(f -> { try { Files.deleteIfExists(f); } catch (IOException ignored) {} });
                 }
                 Files.deleteIfExists(dir);
             }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        } catch (IOException e) { e.printStackTrace(); }
     }
 
     // ==================== DTO конвертер ====================
 
     private SprSupplierDTO toDTO(SprSupplier s) {
         return SprSupplierDTO.builder()
-                .uid(s.getUid())
-                .code(s.getCode())
-                .name(s.getName())
+                .uid(s.getUid()).code(s.getCode()).name(s.getName())
                 .countryUid(s.getCountry() != null ? s.getCountry().getUid() : null)
                 .countryName(s.getCountry() != null ? s.getCountry().getName() : null)
                 .address(s.getAddress())
                 .shortDescriptionUid(s.getShortDescription() != null ? s.getShortDescription().getUid() : null)
                 .shortDescriptionName(s.getShortDescription() != null ? s.getShortDescription().getName() : null)
-                .description(s.getDescription())
-                .email(s.getEmail())
-                .website(s.getWebsite())
-                .phone(s.getPhone())
+                .description(s.getDescription()).email(s.getEmail()).website(s.getWebsite()).phone(s.getPhone())
                 .brandUid(s.getBrand() != null ? s.getBrand().getUid() : null)
                 .brandName(s.getBrand() != null ? s.getBrand().getName() : null)
-                .inn(s.getInn())
-                .ogrn(s.getOgrn())
-                .kpp(s.getKpp())
-                .contactPerson(s.getContactPerson())
-                .contactPosition(s.getContactPosition())
-                .contactPhone(s.getContactPhone())
-                .director(s.getDirector())
-                .directorPosition(s.getDirectorPosition())
-                .bankName(s.getBankName())
-                .bik(s.getBik())
-                .correspondentAccount(s.getCorrespondentAccount())
-                .settlementAccount(s.getSettlementAccount())
-                .createdAt(s.getCreatedAt())
-                .updatedAt(s.getUpdatedAt())
+                .inn(s.getInn()).ogrn(s.getOgrn()).kpp(s.getKpp())
+                .contactPerson(s.getContactPerson()).contactPosition(s.getContactPosition()).contactPhone(s.getContactPhone())
+                .director(s.getDirector()).directorPosition(s.getDirectorPosition())
+                .bankName(s.getBankName()).bik(s.getBik())
+                .correspondentAccount(s.getCorrespondentAccount()).settlementAccount(s.getSettlementAccount())
+                .createdAt(s.getCreatedAt()).updatedAt(s.getUpdatedAt())
                 .build();
     }
 }

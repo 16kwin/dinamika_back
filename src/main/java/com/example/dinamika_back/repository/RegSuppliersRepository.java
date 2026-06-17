@@ -21,6 +21,7 @@ public interface RegSuppliersRepository extends JpaRepository<RegSuppliers, UUID
     /** Найти все материалы поставщика */
     List<RegSuppliers> findBySupplierUid(UUID supplierUid);
     
+    
     /** Удалить все привязки поставщиков к материалу */
     @Modifying
     @Transactional
