@@ -1,4 +1,4 @@
-// ==================== ПОЛНЫЙ NomenclatureService.java ====================
+// NomenclatureService.java — ПОЛНЫЙ ФАЙЛ (исправлен MaterialSupplyDTO)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -1368,6 +1368,7 @@ public class NomenclatureService {
                 .map(r -> new MaterialSupplyDTO(
                         r.getUid(),
                         r.getMaterial() != null ? r.getMaterial().getUid() : materialUid,
+                        null,
                         r.getSupplier() != null ? r.getSupplier().getUid() : null,
                         r.getSupplier() != null ? r.getSupplier().getName() : null,
                         r.getSupplyDate(),
@@ -1409,6 +1410,7 @@ public class NomenclatureService {
         return new MaterialSupplyDTO(
                 regSuppliers.getUid(),
                 materialUid,
+                material.getNameMaterial(),
                 supplier.getUid(),
                 supplier.getName(),
                 regSuppliers.getSupplyDate(),

@@ -1,4 +1,4 @@
-// SupplierService.java — ПОЛНЫЙ ФАЙЛ (добавлены поставки)
+// SupplierService.java — ПОЛНЫЙ ФАЙЛ (добавлен materialName в поставки)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -415,6 +415,7 @@ public class SupplierService {
                 .map(r -> new MaterialSupplyDTO(
                         r.getUid(),
                         r.getMaterial() != null ? r.getMaterial().getUid() : null,
+                        r.getMaterial() != null ? r.getMaterial().getNameMaterial() : null,
                         r.getSupplier() != null ? r.getSupplier().getUid() : null,
                         r.getSupplier() != null ? r.getSupplier().getName() : null,
                         r.getSupplyDate(),
@@ -454,6 +455,7 @@ public class SupplierService {
         return new MaterialSupplyDTO(
                 regSuppliers.getUid(),
                 material.getUid(),
+                material.getNameMaterial(),
                 supplier.getUid(),
                 supplier.getName(),
                 regSuppliers.getSupplyDate(),

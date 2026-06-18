@@ -1,4 +1,3 @@
-// MaterialSupplyDTO.java
 package com.example.dinamika_back.dto;
 
 import lombok.AllArgsConstructor;
@@ -13,6 +12,7 @@ import java.util.UUID;
 public class MaterialSupplyDTO {
     private UUID uid;
     private UUID materialUid;
+    private String materialName;  // ДОБАВЛЕНО — название материала
     private UUID supplierUid;
     private String supplierName;
     private LocalDateTime supplyDate;
