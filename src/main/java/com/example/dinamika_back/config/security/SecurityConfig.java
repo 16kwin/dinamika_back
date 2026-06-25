@@ -139,6 +139,7 @@ public class SecurityConfig {
                             .requestMatchers(HttpMethod.DELETE, "/api/test-documents/**").authenticated()
                             .requestMatchers(HttpMethod.POST, "/api/sync/**").permitAll()
                             .requestMatchers("/api/nomenclature/**").permitAll()
+                            .requestMatchers("/api/templates/**").permitAll()
                             .anyRequest().authenticated())
             .sessionManagement(sessionManagement -> sessionManagement
                     .sessionCreationPolicy(SessionCreationPolicy.STATELESS)

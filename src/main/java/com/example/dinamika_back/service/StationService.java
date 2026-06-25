@@ -27,7 +27,6 @@ public class StationService {
         Specification<Station> spec = buildSpecification(filters);
         List<Station> stations = stationRepository.findAll(spec);
         
-        // Применяем сортировку
         stations = applySorting(stations, filters);
         
         return stations.stream()
@@ -39,7 +38,6 @@ public class StationService {
         Specification<Station> spec = buildSpecification(filters);
         List<Station> stations = stationRepository.findAll(spec);
         
-        // Применяем сортировку
         stations = applySorting(stations, filters);
         
         return stations.stream()
@@ -75,7 +73,6 @@ public class StationService {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             
-            // Поиск по названию станции, участка, цеха, предприятия
             if (filters.getSearchQuery() != null && !filters.getSearchQuery().isEmpty()) {
                 String searchPattern = "%" + filters.getSearchQuery().toLowerCase() + "%";
                 Predicate namePredicate = cb.like(cb.lower(root.get("name")), searchPattern);
@@ -87,22 +84,18 @@ public class StationService {
                 predicates.add(cb.or(namePredicate, sectionPredicate, workshopPredicate, enterprisePredicate));
             }
             
-            // Фильтр по предприятиям
             if (filters.getSelectedEnterprises() != null && !filters.getSelectedEnterprises().isEmpty()) {
                 predicates.add(root.get("enterprise").get("id").in(filters.getSelectedEnterprises()));
             }
             
-            // Фильтр по цехам
             if (filters.getSelectedWorkshops() != null && !filters.getSelectedWorkshops().isEmpty()) {
                 predicates.add(root.get("workshop").get("id").in(filters.getSelectedWorkshops()));
             }
             
-            // Фильтр по участкам
             if (filters.getSelectedSections() != null && !filters.getSelectedSections().isEmpty()) {
                 predicates.add(root.get("section").get("id").in(filters.getSelectedSections()));
             }
             
-            // Фильтр по статусам
             if (filters.getSelectedStatuses() != null && !filters.getSelectedStatuses().isEmpty()) {
                 List<StationStatus> statuses = filters.getSelectedStatuses().stream()
                         .map(StationStatus::valueOf)
@@ -110,17 +103,14 @@ public class StationService {
                 predicates.add(root.get("status").in(statuses));
             }
             
-            // Минимальный остаток
             if (filters.getMinOstatok() != null && filters.getMinOstatok()) {
                 predicates.add(cb.equal(root.get("status"), StationStatus.MINIMAL_STOCK));
             }
             
-            // Критический остаток
             if (filters.getCriticalOstatok() != null && filters.getCriticalOstatok()) {
                 predicates.add(cb.equal(root.get("status"), StationStatus.CRITICAL_STOCK));
             }
             
-            // Фильтр по типам станций
             if (filters.getSelectedTypes() != null && !filters.getSelectedTypes().isEmpty()) {
                 List<StationType> types = filters.getSelectedTypes().stream()
                         .map(StationType::valueOf)
@@ -128,23 +118,14 @@ public class StationService {
                 predicates.add(root.get("stationType").in(types));
             }
             
-            // Сверхнормы
-            if (filters.getOverissue() != null) {
-                // Логика для сверхнормы (нужно уточнить какое поле отвечает)
-                // predicates.add(cb.equal(root.get("overissue"), filters.getOverissue()));
-            }
-            
-            // Ошибка
             if (filters.getHasError() != null) {
                 predicates.add(cb.equal(root.get("hasError"), filters.getHasError()));
             }
             
-            // ТМЦ
             if (filters.getIsTmc() != null) {
                 predicates.add(cb.equal(root.get("isTmc"), filters.getIsTmc()));
             }
             
-            // СГД
             if (filters.getIsSgd() != null) {
                 predicates.add(cb.equal(root.get("isSgd"), filters.getIsSgd()));
             }
@@ -225,22 +206,25 @@ public class StationService {
         Long workshopId = station.getWorkshop() != null ? station.getWorkshop().getId() : null;
         Long sectionId = station.getSection() != null ? station.getSection().getId() : null;
         
-        return new StationStaticDto(
-                station.getUid(),
-                station.getName(),
-                workshopName,
-                sectionName,
-                enterpriseId,
-                workshopId,
-                sectionId,
-                station.getStatus() != null ? station.getStatus().name() : null,
-                station.getStationType() != null ? station.getStationType().name() : null,
-                station.getParentUid(),
-                station.getHasError(),
-                station.getIsTmc(),
-                station.getIsSgd(),
-                station.getIsOk()
-        );
+        StationStaticDto dto = new StationStaticDto();
+        dto.setUid(station.getUid());
+        dto.setName(station.getName());
+        dto.setWorkshop(workshopName);
+        dto.setSection(sectionName);
+        dto.setEnterpriseId(enterpriseId);
+        dto.setWorkshopId(workshopId);
+        dto.setSectionId(sectionId);
+        dto.setStatus(station.getStatus() != null ? station.getStatus().name() : null);
+        dto.setStationType(station.getStationType() != null ? station.getStationType().name() : null);
+        dto.setParentUid(station.getParentUid());
+        dto.setHasError(station.getHasError());
+        dto.setIsTmc(station.getIsTmc());
+        dto.setIsSgd(station.getIsSgd());
+        dto.setIsOk(station.getIsOk());
+        dto.setActiveTemplateUid(station.getActiveTemplate() != null ? station.getActiveTemplate().getUid().toString() : null);
+        dto.setActiveTemplateName(station.getActiveTemplate() != null ? station.getActiveTemplate().getNamePattern() : null);
+        
+        return dto;
     }
     
     private StationDynamicDto convertToDynamicDto(Station station) {

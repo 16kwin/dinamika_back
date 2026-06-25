@@ -5,12 +5,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.LocalDateTime;
 import java.util.UUID;
 
-/**
- * Документ "Шаблон пополнения станции".
- * Определяет номенклатуру и количество материалов, которые должны находиться в ячейках станции.
- */
 @Entity
 @Table(name = "doc_pattern")
 @Getter
@@ -26,12 +23,49 @@ public class DocPattern {
     @Column(name = "name_pattern", nullable = false)
     private String namePattern;
 
-    /** Статус документа (активен/неактивен) */
-    @Column(name = "status_doc", nullable = false)
-    private Boolean statusDoc;
+    /** Номер шаблона (автоинкремент) */
+    @Column(name = "number", unique = true)
+    private Long number;
 
-    /** Станция, к которой привязан шаблон */
+    /** Категория шаблона */
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "name_station", referencedColumnName = "uid")
-    private Station station;
+    @JoinColumn(name = "category_id")
+    private TemplateCategory category;
+
+    /** Конфигурация шаблона (пока пустая) */
+    @Column(name = "configuration", columnDefinition = "TEXT DEFAULT ''")
+    private String configuration;
+
+    /** Общее количество ячеек */
+    @Column(name = "total_cells", nullable = false)
+    private Integer totalCells = 0;
+
+    /** Количество заполненных ячеек */
+    @Column(name = "filled_cells", nullable = false)
+    private Integer filledCells = 0;
+
+    /** Количество свободных ячеек */
+    @Column(name = "free_cells", nullable = false)
+    private Integer freeCells = 0;
+
+    @Column(name = "created_at", updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+
+    @PrePersist
+    protected void onCreate() {
+        createdAt = LocalDateTime.now();
+        updatedAt = LocalDateTime.now();
+        if (totalCells == null) totalCells = 0;
+        if (filledCells == null) filledCells = 0;
+        if (freeCells == null) freeCells = 0;
+        if (configuration == null) configuration = "";
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = LocalDateTime.now();
+    }
 }

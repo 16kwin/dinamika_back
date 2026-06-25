@@ -4,22 +4,34 @@ package com.example.dinamika_back.controller;
 import com.example.dinamika_back.dto.StationDynamicDto;
 import com.example.dinamika_back.dto.StationStaticDto;
 import com.example.dinamika_back.dto.UserFilterDTO;
+import com.example.dinamika_back.model.DocPattern;
+import com.example.dinamika_back.model.Station;
+import com.example.dinamika_back.repository.DocPatternRepository;
+import com.example.dinamika_back.repository.StationRepository;
 import com.example.dinamika_back.service.StationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/stations")
 public class StationController {
 
     private final StationService stationService;
+    private final StationRepository stationRepository;
+    private final DocPatternRepository docPatternRepository;
 
     @Autowired
-    public StationController(StationService stationService) {
+    public StationController(StationService stationService, 
+                             StationRepository stationRepository,
+                             DocPatternRepository docPatternRepository) {
         this.stationService = stationService;
+        this.stationRepository = stationRepository;
+        this.docPatternRepository = docPatternRepository;
     }
 
     @PostMapping("/static/filtered")
@@ -62,5 +74,26 @@ public class StationController {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok(station);
+    }
+
+    @PutMapping("/{uid}")
+    public ResponseEntity<StationStaticDto> updateStation(@PathVariable String uid, @RequestBody Map<String, Object> updates) {
+        Station station = stationRepository.findByUid(uid)
+                .orElseThrow(() -> new RuntimeException("Станция не найдена: " + uid));
+
+        if (updates.containsKey("activeTemplateUid")) {
+            Object templateUidObj = updates.get("activeTemplateUid");
+            if (templateUidObj != null && !templateUidObj.toString().isEmpty()) {
+                UUID templateUid = UUID.fromString(templateUidObj.toString());
+                DocPattern template = docPatternRepository.findById(templateUid)
+                        .orElseThrow(() -> new RuntimeException("Шаблон не найден: " + templateUid));
+                station.setActiveTemplate(template);
+            } else {
+                station.setActiveTemplate(null);
+            }
+            stationRepository.save(station);
+        }
+
+        return ResponseEntity.ok(stationService.getStaticByUid(uid));
     }
 }

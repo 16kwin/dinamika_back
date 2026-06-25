@@ -25,4 +25,6 @@ public class StationStaticDto {
     private Boolean isTmc;
     private Boolean isSgd;
     private Boolean isOk;
+    private String activeTemplateUid;
+    private String activeTemplateName;
 }

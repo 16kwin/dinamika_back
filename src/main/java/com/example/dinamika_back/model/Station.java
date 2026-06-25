@@ -79,6 +79,10 @@ public class Station {
     @Column(name = "is_ok", nullable = false)
     private Boolean isOk;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "active_template_uid", referencedColumnName = "uid")
+    private DocPattern activeTemplate;
+
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
