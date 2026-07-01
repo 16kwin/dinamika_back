@@ -28,8 +28,14 @@ public class UserFilterDTO {
     // Статусы
     private List<String> selectedStatuses;
     
-    // Типы станций
+    // Типы станций (старые enum-значения, оставляем для совместимости)
     private List<String> selectedTypes;
+    
+    // Типы станций (UUID из station_types)
+    private List<String> selectedTypeUids;
+    
+    // Модели станций (UUID из station_models)
+    private List<String> selectedModelUids;
     
     // Сверхнормы
     private Boolean overissue;

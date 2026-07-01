@@ -19,6 +19,8 @@ public interface WorkshopRepository extends JpaRepository<Workshop, Long> {
     
     Optional<Workshop> findByNameAndEnterpriseId(String name, Long enterpriseId);
     
+    boolean existsByNameAndEnterpriseId(String name, Long enterpriseId);
+    
     @Query("SELECT w FROM Workshop w LEFT JOIN FETCH w.sections WHERE w.enterprise.id = ?1 ORDER BY w.name ASC")
     Set<Workshop> findByEnterpriseIdWithSections(Long enterpriseId);
 }

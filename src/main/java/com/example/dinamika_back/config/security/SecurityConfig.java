@@ -1,3 +1,4 @@
+// SecurityConfig.java — ПОЛНЫЙ ФАЙЛ
 package com.example.dinamika_back.config.security;
 
 import com.nimbusds.jose.crypto.DirectDecrypter;
@@ -140,6 +141,13 @@ public class SecurityConfig {
                             .requestMatchers(HttpMethod.POST, "/api/sync/**").permitAll()
                             .requestMatchers("/api/nomenclature/**").permitAll()
                             .requestMatchers("/api/templates/**").permitAll()
+                            .requestMatchers("/api/enterprises/**").permitAll()
+                            .requestMatchers("/api/workshops/**").permitAll()
+                            .requestMatchers("/api/sections/**").permitAll()
+                            .requestMatchers("/api/station-types/**").permitAll()
+                            .requestMatchers("/api/station-manufacturers/**").permitAll()
+                            .requestMatchers("/api/station-models/**").permitAll()
+                            .requestMatchers("/api/station-configurations/**").permitAll()
                             .anyRequest().authenticated())
             .sessionManagement(sessionManagement -> sessionManagement
                     .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
@@ -147,7 +155,21 @@ public class SecurityConfig {
             .csrf(csrf -> csrf
                     .csrfTokenRepository(csrfTokenRepository)
                     .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                    .ignoringRequestMatchers("/api/auth/login", "/api/auth/refresh_token", "/csrf", "/ws-stations/**", "/api/sync/**", "/api/nomenclature/**")
+                    .ignoringRequestMatchers(
+                            "/api/auth/login",
+                            "/api/auth/refresh_token",
+                            "/csrf",
+                            "/ws-stations/**",
+                            "/api/sync/**",
+                            "/api/nomenclature/**",
+                            "/api/enterprises/**",
+                            "/api/workshops/**",
+                            "/api/sections/**",
+                            "/api/station-types/**",
+                            "/api/station-manufacturers/**",
+                            "/api/station-models/**",
+                            "/api/station-configurations/**"
+                    )
                     .sessionAuthenticationStrategy((authentication, request, response) -> {
                     }));
 

@@ -15,6 +15,8 @@ public interface EnterpriseRepository extends JpaRepository<Enterprise, Long> {
     
     Optional<Enterprise> findByName(String name);
     
+    boolean existsByName(String name);
+    
     List<Enterprise> findAllByOrderByNameAsc();
     
     @Query("SELECT e FROM Enterprise e LEFT JOIN FETCH e.workshops w LEFT JOIN FETCH w.sections WHERE e.id = ?1")

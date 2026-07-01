@@ -17,5 +17,7 @@ public interface SectionRepository extends JpaRepository<Section, Long> {
     
     Optional<Section> findByNameAndWorkshopId(String name, Long workshopId);
     
+    boolean existsByNameAndWorkshopId(String name, Long workshopId);
+    
     List<Section> findByWorkshopIdIn(List<Long> workshopIds);
 }

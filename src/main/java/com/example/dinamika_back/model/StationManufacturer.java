@@ -1,4 +1,4 @@
-// StationType.java
+// StationManufacturer.java
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
@@ -10,11 +10,11 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "station_types")
+@Table(name = "station_manufacturers")
 @Getter
 @Setter
 @NoArgsConstructor
-public class StationType {
+public class StationManufacturer {
 
     @Id
     @Column(name = "uid", updatable = false, nullable = false)

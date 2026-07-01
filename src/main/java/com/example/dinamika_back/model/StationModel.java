@@ -1,4 +1,3 @@
-// StationType.java
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
@@ -10,21 +9,41 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "station_types")
+@Table(name = "station_models")
 @Getter
 @Setter
 @NoArgsConstructor
-public class StationType {
+public class StationModel {
 
     @Id
     @Column(name = "uid", updatable = false, nullable = false)
     private UUID uid;
 
-    @Column(name = "name", nullable = false, unique = true, length = 255)
+    @Column(name = "code", nullable = false, unique = true)
+    private Integer code;
+
+    @Column(name = "name", nullable = false, length = 255)
     private String name;
 
-    @Column(name = "description", length = 500)
-    private String description;
+    @Column(name = "article", length = 255)
+    private String article;
+
+    @Column(name = "revision", length = 255)
+    private String revision;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "type_id")
+    private StationType type;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "manufacturer_id")
+    private StationManufacturer manufacturer;
+
+    @Column(name = "purpose", columnDefinition = "TEXT")
+    private String purpose;
+
+    @Column(name = "cells_structure", columnDefinition = "TEXT")
+    private String cellsStructure;
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

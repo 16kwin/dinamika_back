@@ -6,7 +6,6 @@ import com.example.dinamika_back.dto.StationStaticDto;
 import com.example.dinamika_back.dto.UserFilterDTO;
 import com.example.dinamika_back.model.Station;
 import com.example.dinamika_back.model.StationStatus;
-import com.example.dinamika_back.model.StationType;
 import com.example.dinamika_back.repository.StationRepository;
 import jakarta.persistence.criteria.*;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -111,11 +111,23 @@ public class StationService {
                 predicates.add(cb.equal(root.get("status"), StationStatus.CRITICAL_STOCK));
             }
             
-            if (filters.getSelectedTypes() != null && !filters.getSelectedTypes().isEmpty()) {
-                List<StationType> types = filters.getSelectedTypes().stream()
-                        .map(StationType::valueOf)
+            // Фильтр по типам станций — теперь через model.type.uid
+            if (filters.getSelectedTypeUids() != null && !filters.getSelectedTypeUids().isEmpty()) {
+                List<UUID> typeUids = filters.getSelectedTypeUids().stream()
+                        .map(UUID::fromString)
                         .collect(Collectors.toList());
-                predicates.add(root.get("stationType").in(types));
+                predicates.add(root.join("model", JoinType.LEFT)
+                        .join("type", JoinType.LEFT)
+                        .get("uid").in(typeUids));
+            }
+            
+            // Фильтр по моделям станций
+            if (filters.getSelectedModelUids() != null && !filters.getSelectedModelUids().isEmpty()) {
+                List<UUID> modelUids = filters.getSelectedModelUids().stream()
+                        .map(UUID::fromString)
+                        .collect(Collectors.toList());
+                predicates.add(root.join("model", JoinType.LEFT)
+                        .get("uid").in(modelUids));
             }
             
             if (filters.getHasError() != null) {
@@ -215,7 +227,17 @@ public class StationService {
         dto.setWorkshopId(workshopId);
         dto.setSectionId(sectionId);
         dto.setStatus(station.getStatus() != null ? station.getStatus().name() : null);
-        dto.setStationType(station.getStationType() != null ? station.getStationType().name() : null);
+        
+        // Тип через модель
+        if (station.getModel() != null) {
+            dto.setModelId(station.getModel().getUid().toString());
+            dto.setModelName(station.getModel().getName());
+            if (station.getModel().getType() != null) {
+                dto.setStationType(station.getModel().getType().getName());
+                dto.setStationTypeUid(station.getModel().getType().getUid().toString());
+            }
+        }
+        
         dto.setParentUid(station.getParentUid());
         dto.setHasError(station.getHasError());
         dto.setIsTmc(station.getIsTmc());

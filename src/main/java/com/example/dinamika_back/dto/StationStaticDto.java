@@ -20,6 +20,9 @@ public class StationStaticDto {
     private Long sectionId;
     private String status;
     private String stationType;
+    private String stationTypeUid;
+    private String modelId;
+    private String modelName;
     private String parentUid;
     private Boolean hasError;
     private Boolean isTmc;

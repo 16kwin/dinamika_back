@@ -1,4 +1,4 @@
-// StationType.java
+// StationModelImage.java
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
@@ -10,37 +10,35 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "station_types")
+@Table(name = "station_model_images")
 @Getter
 @Setter
 @NoArgsConstructor
-public class StationType {
+public class StationModelImage {
 
     @Id
     @Column(name = "uid", updatable = false, nullable = false)
     private UUID uid;
 
-    @Column(name = "name", nullable = false, unique = true, length = 255)
-    private String name;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "model_uid", nullable = false)
+    private StationModel model;
 
-    @Column(name = "description", length = 500)
-    private String description;
+    @Column(name = "file_path", nullable = false, length = 500)
+    private String filePath;
+
+    @Column(name = "original_name", length = 500)
+    private String originalName;
+
+    @Column(name = "sort_order")
+    private Integer sortOrder;
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
-
-    @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
 
     @PrePersist
     protected void onCreate() {
         if (uid == null) uid = UUID.randomUUID();
         createdAt = LocalDateTime.now();
-        updatedAt = LocalDateTime.now();
-    }
-
-    @PreUpdate
-    protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
     }
 }

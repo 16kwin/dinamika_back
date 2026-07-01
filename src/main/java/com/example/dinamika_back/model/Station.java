@@ -60,9 +60,9 @@ public class Station {
     @Column(name = "ready_parts_count", nullable = false)
     private Integer readyPartsCount;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "station_type", nullable = false)
-    private StationType stationType;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "model_id", referencedColumnName = "uid")
+    private StationModel model;
 
     @Column(name = "parent_uid", length = 50)
     private String parentUid;
