@@ -2,6 +2,7 @@
 package com.example.dinamika_back.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -24,6 +25,11 @@ public class Enterprise {
 
     @Column(name = "name", nullable = false, unique = true, length = 255)
     private String name;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "holding_id")
+    @JsonIgnoreProperties("enterprises")
+    private Holding holding;
 
     @JsonIgnore
     @OneToMany(mappedBy = "enterprise", cascade = CascadeType.ALL, orphanRemoval = true)

@@ -1,4 +1,4 @@
-// SectionFlatDto.java
+// HoldingDTO.java
 package com.example.dinamika_back.dto;
 
 import lombok.AllArgsConstructor;
@@ -6,17 +6,16 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class SectionFlatDto {
+public class HoldingDTO {
     private Long id;
     private String name;
-    private Long holdingId;
-    private String holdingName;
-    private Long enterpriseId;
-    private String enterpriseName;
-    private Long workshopId;
-    private String workshopName;
+    private String description;
+    private List<EnterpriseDTO> enterprises = new ArrayList<>();
 }

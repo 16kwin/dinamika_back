@@ -1,3 +1,4 @@
+// DocPattern.java — ПОЛНЫЙ ФАЙЛ
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
@@ -19,36 +20,33 @@ public class DocPattern {
     @Column(name = "uid", nullable = false)
     private UUID uid;
 
-    /** Наименование шаблона */
-    @Column(name = "name_pattern", nullable = false)
+    @Column(name = "name_pattern")
     private String namePattern;
 
-    /** Номер шаблона (автоинкремент) */
-    @Column(name = "number", unique = true)
+    @Column(name = "number")
     private Long number;
 
-    /** Категория шаблона */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
     private TemplateCategory category;
 
-    /** Конфигурация шаблона (пока пустая) */
-    @Column(name = "configuration", columnDefinition = "TEXT DEFAULT ''")
+    @Column(name = "configuration", columnDefinition = "TEXT")
     private String configuration;
 
-    /** Общее количество ячеек */
-    @Column(name = "total_cells", nullable = false)
-    private Integer totalCells = 0;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "configuration_uid", referencedColumnName = "uid")
+    private StationConfiguration stationConfiguration;
 
-    /** Количество заполненных ячеек */
-    @Column(name = "filled_cells", nullable = false)
-    private Integer filledCells = 0;
+    @Column(name = "total_cells")
+    private Integer totalCells;
 
-    /** Количество свободных ячеек */
-    @Column(name = "free_cells", nullable = false)
-    private Integer freeCells = 0;
+    @Column(name = "filled_cells")
+    private Integer filledCells;
 
-    @Column(name = "created_at", updatable = false)
+    @Column(name = "free_cells")
+    private Integer freeCells;
+
+    @Column(name = "created_at")
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at")
@@ -61,7 +59,6 @@ public class DocPattern {
         if (totalCells == null) totalCells = 0;
         if (filledCells == null) filledCells = 0;
         if (freeCells == null) freeCells = 0;
-        if (configuration == null) configuration = "";
     }
 
     @PreUpdate

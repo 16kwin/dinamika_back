@@ -13,5 +13,8 @@ import lombok.Setter;
 public class SectionDTO {
     private Long id;
     private String name;
+    private Long holdingId;
+    private String holdingName;
+    private Long enterpriseId;
     private Long workshopId;
 }

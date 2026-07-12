@@ -1,4 +1,4 @@
-// StationRepository.java
+// StationRepository.java — ПОЛНЫЙ ФАЙЛ
 package com.example.dinamika_back.repository;
 
 import com.example.dinamika_back.model.Station;
@@ -20,6 +20,13 @@ public interface StationRepository extends JpaRepository<Station, Long>, JpaSpec
     
     Optional<Station> findByUid(String uid);
     
+    boolean existsByUid(String uid);
+    
     @Query("SELECT s FROM Station s WHERE s.activeTemplate.uid = :templateUid")
     List<Station> findByActiveTemplateUid(@Param("templateUid") UUID templateUid);
+    
+    @Query("SELECT MAX(s.code) FROM Station s")
+    Integer findMaxCode();
+    
+    boolean existsByCode(Integer code);
 }

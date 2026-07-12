@@ -13,6 +13,8 @@ import lombok.Setter;
 public class WorkshopFlatDto {
     private Long id;
     private String name;
+    private Long holdingId;
+    private String holdingName;
     private Long enterpriseId;
     private String enterpriseName;
 }

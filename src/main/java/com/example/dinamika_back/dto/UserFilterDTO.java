@@ -21,6 +21,7 @@ public class UserFilterDTO {
     private SortOption sortOption;
     
     // Размещение
+    private List<Long> selectedHoldings;
     private List<Long> selectedEnterprises;
     private List<Long> selectedWorkshops;
     private List<Long> selectedSections;

@@ -1,3 +1,4 @@
+// SectionService.java
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.CreateSectionRequest;
@@ -80,11 +81,18 @@ public class SectionService {
 
     private SectionFlatDto toDTO(Section section) {
         String workshopName = section.getWorkshop() != null ? section.getWorkshop().getName() : null;
+        Long workshopId = section.getWorkshop() != null ? section.getWorkshop().getId() : null;
         Long enterpriseId = section.getWorkshop() != null && section.getWorkshop().getEnterprise() != null
                 ? section.getWorkshop().getEnterprise().getId() : null;
         String enterpriseName = section.getWorkshop() != null && section.getWorkshop().getEnterprise() != null
                 ? section.getWorkshop().getEnterprise().getName() : null;
-        return new SectionFlatDto(section.getId(), section.getName(), section.getWorkshop().getId(),
-                workshopName, enterpriseId, enterpriseName);
+        Long holdingId = section.getWorkshop() != null && section.getWorkshop().getEnterprise() != null
+                && section.getWorkshop().getEnterprise().getHolding() != null
+                ? section.getWorkshop().getEnterprise().getHolding().getId() : null;
+        String holdingName = section.getWorkshop() != null && section.getWorkshop().getEnterprise() != null
+                && section.getWorkshop().getEnterprise().getHolding() != null
+                ? section.getWorkshop().getEnterprise().getHolding().getName() : null;
+        return new SectionFlatDto(section.getId(), section.getName(), holdingId, holdingName,
+                enterpriseId, enterpriseName, workshopId, workshopName);
     }
 }

@@ -1,4 +1,4 @@
-// StationService.java (обновленный)
+// StationService.java — ПОЛНЫЙ ФАЙЛ
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.StationDynamicDto;
@@ -80,8 +80,13 @@ public class StationService {
                 Predicate sectionPredicate = cb.like(cb.lower(root.join("section", JoinType.LEFT).get("name")), searchPattern);
                 Predicate workshopPredicate = cb.like(cb.lower(root.join("workshop", JoinType.LEFT).get("name")), searchPattern);
                 Predicate enterprisePredicate = cb.like(cb.lower(root.join("enterprise", JoinType.LEFT).get("name")), searchPattern);
+                Predicate holdingPredicate = cb.like(cb.lower(root.join("holding", JoinType.LEFT).get("name")), searchPattern);
                 
-                predicates.add(cb.or(namePredicate, sectionPredicate, workshopPredicate, enterprisePredicate));
+                predicates.add(cb.or(namePredicate, sectionPredicate, workshopPredicate, enterprisePredicate, holdingPredicate));
+            }
+            
+            if (filters.getSelectedHoldings() != null && !filters.getSelectedHoldings().isEmpty()) {
+                predicates.add(root.get("holding").get("id").in(filters.getSelectedHoldings()));
             }
             
             if (filters.getSelectedEnterprises() != null && !filters.getSelectedEnterprises().isEmpty()) {
@@ -111,7 +116,6 @@ public class StationService {
                 predicates.add(cb.equal(root.get("status"), StationStatus.CRITICAL_STOCK));
             }
             
-            // Фильтр по типам станций — теперь через model.type.uid
             if (filters.getSelectedTypeUids() != null && !filters.getSelectedTypeUids().isEmpty()) {
                 List<UUID> typeUids = filters.getSelectedTypeUids().stream()
                         .map(UUID::fromString)
@@ -121,7 +125,6 @@ public class StationService {
                         .get("uid").in(typeUids));
             }
             
-            // Фильтр по моделям станций
             if (filters.getSelectedModelUids() != null && !filters.getSelectedModelUids().isEmpty()) {
                 List<UUID> modelUids = filters.getSelectedModelUids().stream()
                         .map(UUID::fromString)
@@ -160,20 +163,25 @@ public class StationService {
                 break;
             case PLACEMENT:
                 stations.sort((a, b) -> {
-                    String sectionA = a.getSection() != null ? a.getSection().getName() : "";
-                    String sectionB = b.getSection() != null ? b.getSection().getName() : "";
-                    String workshopA = a.getWorkshop() != null ? a.getWorkshop().getName() : "";
-                    String workshopB = b.getWorkshop() != null ? b.getWorkshop().getName() : "";
+                    String holdingA = a.getHolding() != null ? a.getHolding().getName() : "";
+                    String holdingB = b.getHolding() != null ? b.getHolding().getName() : "";
                     String enterpriseA = a.getEnterprise() != null ? a.getEnterprise().getName() : "";
                     String enterpriseB = b.getEnterprise() != null ? b.getEnterprise().getName() : "";
+                    String workshopA = a.getWorkshop() != null ? a.getWorkshop().getName() : "";
+                    String workshopB = b.getWorkshop() != null ? b.getWorkshop().getName() : "";
+                    String sectionA = a.getSection() != null ? a.getSection().getName() : "";
+                    String sectionB = b.getSection() != null ? b.getSection().getName() : "";
                     
-                    int sectionCompare = sectionA.compareTo(sectionB);
-                    if (sectionCompare != 0) return sectionCompare;
+                    int holdingCompare = holdingA.compareTo(holdingB);
+                    if (holdingCompare != 0) return holdingCompare;
+                    
+                    int enterpriseCompare = enterpriseA.compareTo(enterpriseB);
+                    if (enterpriseCompare != 0) return enterpriseCompare;
                     
                     int workshopCompare = workshopA.compareTo(workshopB);
                     if (workshopCompare != 0) return workshopCompare;
                     
-                    return enterpriseA.compareTo(enterpriseB);
+                    return sectionA.compareTo(sectionB);
                 });
                 break;
             case STATUS:
@@ -212,23 +220,28 @@ public class StationService {
     }
     
     private StationStaticDto convertToStaticDto(Station station) {
-        String workshopName = station.getWorkshop() != null ? station.getWorkshop().getName() : null;
-        String sectionName = station.getSection() != null ? station.getSection().getName() : null;
+        Long holdingId = station.getHolding() != null ? station.getHolding().getId() : null;
+        String holdingName = station.getHolding() != null ? station.getHolding().getName() : null;
         Long enterpriseId = station.getEnterprise() != null ? station.getEnterprise().getId() : null;
+        String enterpriseName = station.getEnterprise() != null ? station.getEnterprise().getName() : null;
         Long workshopId = station.getWorkshop() != null ? station.getWorkshop().getId() : null;
+        String workshopName = station.getWorkshop() != null ? station.getWorkshop().getName() : null;
         Long sectionId = station.getSection() != null ? station.getSection().getId() : null;
+        String sectionName = station.getSection() != null ? station.getSection().getName() : null;
         
         StationStaticDto dto = new StationStaticDto();
         dto.setUid(station.getUid());
         dto.setName(station.getName());
-        dto.setWorkshop(workshopName);
-        dto.setSection(sectionName);
+        dto.setHoldingId(holdingId);
+        dto.setHoldingName(holdingName);
         dto.setEnterpriseId(enterpriseId);
+        dto.setEnterprise(enterpriseName);
         dto.setWorkshopId(workshopId);
+        dto.setWorkshop(workshopName);
         dto.setSectionId(sectionId);
+        dto.setSection(sectionName);
         dto.setStatus(station.getStatus() != null ? station.getStatus().name() : null);
         
-        // Тип через модель
         if (station.getModel() != null) {
             dto.setModelId(station.getModel().getUid().toString());
             dto.setModelName(station.getModel().getName());
@@ -236,6 +249,10 @@ public class StationService {
                 dto.setStationType(station.getModel().getType().getName());
                 dto.setStationTypeUid(station.getModel().getType().getUid().toString());
             }
+        }
+        
+        if (station.getConfiguration() != null) {
+            dto.setConfigurationUid(station.getConfiguration().getUid().toString());
         }
         
         dto.setParentUid(station.getParentUid());

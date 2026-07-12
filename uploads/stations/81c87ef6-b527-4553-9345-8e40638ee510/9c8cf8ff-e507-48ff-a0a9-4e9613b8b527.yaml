@@ -1,0 +1,755 @@
+openapi: 3.0.0
+info:
+  title: Orders & TKP API
+  description: API для работы с заказами и ТКП
+  version: 1.0.0
+
+paths:
+  # ============================================
+  # 1. Список актуальных заказов
+  # ============================================
+  /api/orders/active:
+    get:
+      summary: Список актуальных заказов
+      operationId: getActiveOrders
+      tags:
+        - Заказы
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrderShort'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================
+  # 2. Список закрытых заказов
+  # ============================================
+  /api/orders/closed:
+    get:
+      summary: Список закрытых (успешных) заказов
+      operationId: getClosedOrders
+      tags:
+        - Заказы
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrderClosedShort'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================
+  # 3. Список актуальных ТКП
+  # ============================================
+  /api/tkp/active:
+    get:
+      summary: Список актуальных ТКП
+      operationId: getActiveTkp
+      tags:
+        - ТКП
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TkpShort'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================
+  # 4. Список закрытых ТКП
+  # ============================================
+  /api/tkp/closed:
+    get:
+      summary: Список закрытых (успешных) ТКП
+      operationId: getClosedTkp
+      tags:
+        - ТКП
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TkpClosedShort'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================
+  # 5. Заказ на поставку (GET + POST)
+  # ============================================
+  /api/orders/{order_uid}:
+    get:
+      summary: Получить заказ на поставку по UID
+      operationId: getOrderByUid
+      tags:
+        - Заказы
+      parameters:
+        - name: order_uid
+          in: path
+          required: true
+          description: UID заказа
+          schema:
+            type: string
+            format: uuid
+            example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderFull'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/orders:
+    post:
+      summary: Создать заказ на поставку
+      operationId: createOrder
+      tags:
+        - Заказы
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderFull'
+      responses:
+        '201':
+          description: Заказ создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderFull'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================
+  # 6. ТКП (GET + POST)
+  # ============================================
+  /api/tkp/{order_uid}:
+    get:
+      summary: Получить ТКП по UID
+      operationId: getTkpByUid
+      tags:
+        - ТКП
+      parameters:
+        - name: order_uid
+          in: path
+          required: true
+          description: UID ТКП
+          schema:
+            type: string
+            format: uuid
+            example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TkpFull'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/tkp:
+    post:
+      summary: Создать ТКП
+      operationId: createTkp
+      tags:
+        - ТКП
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TkpFull'
+      responses:
+        '201':
+          description: ТКП создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TkpFull'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+# ============================================
+# СХЕМЫ
+# ============================================
+components:
+  schemas:
+
+    # ------------------------------------------
+    # Короткая схема заказа (актуальные)
+    # ------------------------------------------
+    OrderShort:
+      type: object
+      required:
+        - order_uid
+        - customer_id
+        - order_number
+        - order_datetime
+        - status
+      properties:
+        order_uid:
+          type: string
+          format: uuid
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        customer_id:
+          type: string
+          format: uuid
+          example: "c9d8e7f6-a5b4-3210-fedc-ba0987654321"
+        order_number:
+          type: string
+          example: "ORD-2026-0001"
+        order_datetime:
+          type: string
+          format: date-time
+          example: "2026-06-29T14:30:00+03:00"
+        status:
+          type: string
+          example: "Новый"
+
+    # ------------------------------------------
+    # Короткая схема закрытого заказа
+    # ------------------------------------------
+    OrderClosedShort:
+      type: object
+      required:
+        - order_uid
+        - customer_id
+        - order_number
+        - order_datetime
+      properties:
+        order_uid:
+          type: string
+          format: uuid
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        customer_id:
+          type: string
+          format: uuid
+          example: "c9d8e7f6-a5b4-3210-fedc-ba0987654321"
+        order_number:
+          type: string
+          example: "ORD-2026-0001"
+        order_datetime:
+          type: string
+          format: date-time
+          example: "2026-06-29T14:30:00+03:00"
+
+    # ------------------------------------------
+    # Короткая схема ТКП (актуальные)
+    # ------------------------------------------
+    TkpShort:
+      type: object
+      required:
+        - order_uid
+        - customer_id
+        - order_number
+        - order_datetime
+        - delivery_date
+        - total_cost
+        - status
+      properties:
+        order_uid:
+          type: string
+          format: uuid
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        customer_id:
+          type: string
+          format: uuid
+          example: "c9d8e7f6-a5b4-3210-fedc-ba0987654321"
+        order_number:
+          type: string
+          example: "ORD-2026-0001"
+        order_datetime:
+          type: string
+          format: date-time
+          example: "2026-06-29T14:30:00+03:00"
+        delivery_date:
+          type: string
+          format: date
+          example: "2026-07-05"
+        total_cost:
+          type: number
+          example: 52500
+        status:
+          type: string
+          example: "Новый"
+
+    # ------------------------------------------
+    # Короткая схема закрытого ТКП
+    # ------------------------------------------
+    TkpClosedShort:
+      type: object
+      required:
+        - order_uid
+        - customer_id
+        - order_number
+        - order_datetime
+        - delivery_date
+        - total_cost
+      properties:
+        order_uid:
+          type: string
+          format: uuid
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        customer_id:
+          type: string
+          format: uuid
+          example: "c9d8e7f6-a5b4-3210-fedc-ba0987654321"
+        order_number:
+          type: string
+          example: "ORD-2026-0001"
+        order_datetime:
+          type: string
+          format: date-time
+          example: "2026-06-29T14:30:00+03:00"
+        delivery_date:
+          type: string
+          format: date
+          example: "2026-07-05"
+        total_cost:
+          type: number
+          example: 52500
+
+    # ------------------------------------------
+    # Полная схема заказа
+    # ------------------------------------------
+    OrderFull:
+      type: object
+      required:
+        - order_uid
+        - ordernumber
+        - orderdata
+        - customer
+        - ogrn
+        - inn
+        - kpp
+        - legaladdress
+        - deliveryaddress
+        - contactperson
+        - contact
+        - products
+      properties:
+        order_uid:
+          type: string
+          format: uuid
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        ordernumber:
+          type: string
+          example: "ORD-2026-0001"
+        orderdata:
+          type: string
+          format: date-time
+          example: "2026-06-29T14:30:00+03:00"
+        customer:
+          type: string
+          example: "ООО «Ромашка»"
+        ogrn:
+          type: string
+          example: "1234567890123"
+        inn:
+          type: string
+          example: "7701234567"
+        kpp:
+          type: string
+          example: "770101001"
+        legaladdress:
+          type: string
+          example: "г. Москва, ул. Тверская, д. 1"
+        deliveryaddress:
+          type: string
+          example: "г. Москва, ул. Ленина, д. 10, склад №3"
+        contactperson:
+          type: string
+          example: "Иванов Иван Иванович"
+        contact:
+          type: string
+          example: "+7 (999) 123-45-67"
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductWithoutCost'
+
+    # ------------------------------------------
+    # Полная схема ТКП
+    # ------------------------------------------
+    TkpFull:
+      type: object
+      required:
+        - order_uid
+        - ordernumber
+        - orderdata
+        - customer
+        - ogrn
+        - inn
+        - kpp
+        - legaladdress
+        - deliveryaddress
+        - contactperson
+        - contact
+        - total_cost
+        - products
+      properties:
+        order_uid:
+          type: string
+          format: uuid
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        ordernumber:
+          type: string
+          example: "ORD-2026-0001"
+        orderdata:
+          type: string
+          format: date-time
+          example: "2026-06-29T14:30:00+03:00"
+        customer:
+          type: string
+          example: "ООО «Ромашка»"
+        ogrn:
+          type: string
+          example: "1234567890123"
+        inn:
+          type: string
+          example: "7701234567"
+        kpp:
+          type: string
+          example: "770101001"
+        legaladdress:
+          type: string
+          example: "г. Москва, ул. Тверская, д. 1"
+        deliveryaddress:
+          type: string
+          example: "г. Москва, ул. Ленина, д. 10, склад №3"
+        contactperson:
+          type: string
+          example: "Иванов Иван Иванович"
+        contact:
+          type: string
+          example: "+7 (999) 123-45-67"
+        total_cost:
+          type: number
+          example: 52500
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductWithCost'
+
+    # ------------------------------------------
+    # Товар (для заказа — без цены и стоимости)
+    # ------------------------------------------
+    ProductWithoutCost:
+      type: object
+      required:
+        - product_uid
+        - article
+        - product
+        - quantity
+        - group
+        - type
+        - description
+        - manufacturer
+        - country
+        - brand
+        - model
+      properties:
+        product_uid:
+          type: string
+          example: "p001-uid-1111-2222-3333-444455556666"
+        article:
+          type: string
+          example: "ART-001"
+        product:
+          type: string
+          example: "Болт М12"
+        quantity:
+          type: number
+          example: 100
+        group:
+          type: string
+          example: "Крепёж"
+        type:
+          type: string
+          example: "Болты"
+        description:
+          type: string
+          example: "Болт стальной оцинкованный М12х60"
+        manufacturer:
+          type: string
+          example: "ООО «Метизы»"
+        country:
+          type: string
+          example: "Россия"
+        brand:
+          type: string
+          example: "СтальКреп"
+        model:
+          type: string
+          example: "БМ12-60"
+        images:
+          type: array
+          items:
+            type: string
+            format: binary
+          example: ["base64image1...", "base64image2..."]
+        draws:
+          type: array
+          items:
+            type: string
+            format: binary
+          example: ["base64draw1...", "base64draw2..."]
+        barcode:
+          $ref: '#/components/schemas/Barcode'
+        sku:
+          $ref: '#/components/schemas/Sku'
+        specifications:
+          type: array
+          items:
+            $ref: '#/components/schemas/Specification'
+        analogues:
+          type: array
+          items:
+            $ref: '#/components/schemas/Analogue'
+
+    # ------------------------------------------
+    # Товар (для ТКП — с ценой и стоимостью)
+    # ------------------------------------------
+    ProductWithCost:
+      type: object
+      required:
+        - product_uid
+        - article
+        - product
+        - quantity
+        - price
+        - cost
+        - group
+        - type
+        - description
+        - manufacturer
+        - country
+        - brand
+        - model
+      properties:
+        product_uid:
+          type: string
+          example: "p001-uid-1111-2222-3333-444455556666"
+        article:
+          type: string
+          example: "ART-001"
+        product:
+          type: string
+          example: "Болт М12"
+        quantity:
+          type: number
+          example: 100
+        price:
+          type: number
+          example: 15.50
+        cost:
+          type: number
+          example: 1550
+        group:
+          type: string
+          example: "Крепёж"
+        type:
+          type: string
+          example: "Болты"
+        description:
+          type: string
+          example: "Болт стальной оцинкованный М12х60"
+        manufacturer:
+          type: string
+          example: "ООО «Метизы»"
+        country:
+          type: string
+          example: "Россия"
+        brand:
+          type: string
+          example: "СтальКреп"
+        model:
+          type: string
+          example: "БМ12-60"
+        images:
+          type: array
+          items:
+            type: string
+            format: binary
+          example: ["base64image1...", "base64image2..."]
+        draws:
+          type: array
+          items:
+            type: string
+            format: binary
+          example: ["base64draw1...", "base64draw2..."]
+        barcode:
+          $ref: '#/components/schemas/Barcode'
+        sku:
+          $ref: '#/components/schemas/Sku'
+        specifications:
+          type: array
+          items:
+            $ref: '#/components/schemas/Specification'
+        analogues:
+          type: array
+          items:
+            $ref: '#/components/schemas/Analogue'
+
+    # ------------------------------------------
+    # Штрихкод
+    # ------------------------------------------
+    Barcode:
+      type: object
+      required:
+        - code
+        - codeimage
+      properties:
+        code:
+          type: string
+          example: "4601234567890"
+        codeimage:
+          type: string
+          format: binary
+          example: "base64binarystring..."
+
+    # ------------------------------------------
+    # SKU
+    # ------------------------------------------
+    Sku:
+      type: object
+      required:
+        - code
+        - image
+      properties:
+        code:
+          type: string
+          example: "SKU-001234"
+        image:
+          type: string
+          format: binary
+          example: "base64binarystring..."
+
+    # ------------------------------------------
+    # Характеристика
+    # ------------------------------------------
+    Specification:
+      type: object
+      required:
+        - characteristic
+        - unit
+        - value
+      properties:
+        characteristic:
+          type: string
+          example: "Диаметр"
+        unit:
+          type: string
+          example: "мм"
+        value:
+          type: string
+          example: "12"
+
+    # ------------------------------------------
+    # Аналог
+    # ------------------------------------------
+    Analogue:
+      type: object
+      required:
+        - uid
+        - name
+        - model
+      properties:
+        uid:
+          type: string
+          example: "analog-uid-aaaa-bbbb-cccc-ddddeeee1111"
+        name:
+          type: string
+          example: "Болт М12 DIN 933"
+        model:
+          type: string
+          example: "БМ12-60-DIN"
+
+  # ============================================
+  # ОТВЕТЫ С ОШИБКАМИ
+  # ============================================
+  responses:
+    BadRequest:
+      description: Неверный запрос
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: "invalid_format"
+              message:
+                type: string
+                example: "Номер заказа не соответствует формату"
+    NotFound:
+      description: Не найдено
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: "not_found"
+              message:
+                type: string
+                example: "Заказ с указанным UID не найден"
+    Conflict:
+      description: Конфликт
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: "duplicate"
+              message:
+                type: string
+                example: "Заказ с таким номером уже существует"
+    InternalError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: "internal_error"
+              message:
+                type: string
+                example: "Внутренняя ошибка сервера"

@@ -8,4 +8,5 @@ import lombok.Setter;
 @Setter
 public class CreateEnterpriseRequest {
     private String name;
+    private Long holdingId;
 }

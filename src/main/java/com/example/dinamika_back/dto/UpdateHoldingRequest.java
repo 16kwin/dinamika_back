@@ -1,4 +1,4 @@
-// UpdateEnterpriseRequest.java
+// UpdateHoldingRequest.java
 package com.example.dinamika_back.dto;
 
 import lombok.Getter;
@@ -6,7 +6,7 @@ import lombok.Setter;
 
 @Getter
 @Setter
-public class UpdateEnterpriseRequest {
+public class UpdateHoldingRequest {
     private String name;
-    private Long holdingId;
+    private String description;
 }

@@ -1,3 +1,4 @@
+// Station.java — ПОЛНЫЙ ФАЙЛ
 package com.example.dinamika_back.model;
 
 import com.example.dinamika_back.listener.StationEntityListener;
@@ -6,6 +7,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
@@ -23,8 +25,24 @@ public class Station {
     @Column(name = "uid", unique = true, nullable = false, length = 50)
     private String uid;
 
+    @Column(name = "code", unique = true)
+    private Integer code;
+
     @Column(name = "name", nullable = false, length = 255)
     private String name;
+
+    @Column(name = "description", columnDefinition = "TEXT")
+    private String description;
+
+    @Column(name = "production_date")
+    private LocalDate productionDate;
+
+    @Column(name = "serial_number", length = 255)
+    private String serialNumber;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "holding_id")
+    private Holding holding;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "enterprise_id")
@@ -64,6 +82,10 @@ public class Station {
     @JoinColumn(name = "model_id", referencedColumnName = "uid")
     private StationModel model;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "configuration_uid", referencedColumnName = "uid")
+    private StationConfiguration configuration;
+
     @Column(name = "parent_uid", length = 50)
     private String parentUid;
 
@@ -78,6 +100,18 @@ public class Station {
 
     @Column(name = "is_ok", nullable = false)
     private Boolean isOk;
+
+    @Column(name = "is_additional_module", nullable = false)
+    private Boolean isAdditionalModule;
+
+    @Column(name = "has_additional_module", nullable = false)
+    private Boolean hasAdditionalModule;
+
+    @Column(name = "ip_address", length = 50)
+    private String ipAddress;
+
+    @Column(name = "network_port")
+    private Integer networkPort;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "active_template_uid", referencedColumnName = "uid")

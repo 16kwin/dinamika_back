@@ -14,5 +14,5 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class HierarchyDTO {
-    private List<EnterpriseDTO> enterprises = new ArrayList<>();
+    private List<HoldingDTO> holdings = new ArrayList<>();
 }

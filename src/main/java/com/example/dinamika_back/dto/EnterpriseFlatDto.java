@@ -13,4 +13,6 @@ import lombok.Setter;
 public class EnterpriseFlatDto {
     private Long id;
     private String name;
+    private Long holdingId;
+    private String holdingName;
 }

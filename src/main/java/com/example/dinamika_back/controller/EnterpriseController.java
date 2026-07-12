@@ -1,3 +1,4 @@
+// EnterpriseController.java
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.CreateEnterpriseRequest;
@@ -18,7 +19,10 @@ public class EnterpriseController {
     private final EnterpriseService enterpriseService;
 
     @GetMapping
-    public ResponseEntity<List<EnterpriseFlatDto>> getAll() {
+    public ResponseEntity<List<EnterpriseFlatDto>> getAll(@RequestParam(required = false) Long holdingId) {
+        if (holdingId != null) {
+            return ResponseEntity.ok(enterpriseService.getByHoldingId(holdingId));
+        }
         return ResponseEntity.ok(enterpriseService.getAll());
     }
 

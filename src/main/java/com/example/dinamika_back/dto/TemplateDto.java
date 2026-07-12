@@ -1,3 +1,4 @@
+// TemplateDto.java — ПОЛНЫЙ ФАЙЛ
 package com.example.dinamika_back.dto;
 
 import lombok.AllArgsConstructor;
@@ -20,6 +21,9 @@ public class TemplateDto {
     private Long categoryId;
     private String categoryName;
     private String configuration;
+    private UUID configurationUid;
+    private String configurationName;
+    private String modelName;
     private Integer totalCells;
     private Integer filledCells;
     private Integer freeCells;

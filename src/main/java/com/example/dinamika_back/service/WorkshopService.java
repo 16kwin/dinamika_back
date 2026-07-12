@@ -1,3 +1,4 @@
+// WorkshopService.java
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.CreateWorkshopRequest;
@@ -80,6 +81,11 @@ public class WorkshopService {
 
     private WorkshopFlatDto toDTO(Workshop workshop) {
         String enterpriseName = workshop.getEnterprise() != null ? workshop.getEnterprise().getName() : null;
-        return new WorkshopFlatDto(workshop.getId(), workshop.getName(), workshop.getEnterprise().getId(), enterpriseName);
+        Long enterpriseId = workshop.getEnterprise() != null ? workshop.getEnterprise().getId() : null;
+        Long holdingId = workshop.getEnterprise() != null && workshop.getEnterprise().getHolding() != null
+                ? workshop.getEnterprise().getHolding().getId() : null;
+        String holdingName = workshop.getEnterprise() != null && workshop.getEnterprise().getHolding() != null
+                ? workshop.getEnterprise().getHolding().getName() : null;
+        return new WorkshopFlatDto(workshop.getId(), workshop.getName(), holdingId, holdingName, enterpriseId, enterpriseName);
     }
 }

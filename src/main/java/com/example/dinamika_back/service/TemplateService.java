@@ -1,10 +1,13 @@
+// TemplateService.java — ПОЛНЫЙ ФАЙЛ
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
 import com.example.dinamika_back.model.DocPattern;
 import com.example.dinamika_back.model.Station;
+import com.example.dinamika_back.model.StationConfiguration;
 import com.example.dinamika_back.model.TemplateCategory;
 import com.example.dinamika_back.repository.DocPatternRepository;
+import com.example.dinamika_back.repository.StationConfigurationRepository;
 import com.example.dinamika_back.repository.StationRepository;
 import com.example.dinamika_back.repository.TemplateCategoryRepository;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +25,7 @@ public class TemplateService {
     private final DocPatternRepository docPatternRepository;
     private final TemplateCategoryRepository categoryRepository;
     private final StationRepository stationRepository;
+    private final StationConfigurationRepository configurationRepository;
 
     // ==================== КАТЕГОРИИ ====================
 
@@ -93,6 +97,12 @@ public class TemplateService {
         template.setNumber(nextNumber);
         template.setConfiguration(request.getConfiguration() != null ? request.getConfiguration() : "");
 
+        if (request.getConfigurationUid() != null) {
+            StationConfiguration config = configurationRepository.findById(request.getConfigurationUid())
+                    .orElseThrow(() -> new RuntimeException("Конфигурация не найдена: " + request.getConfigurationUid()));
+            template.setStationConfiguration(config);
+        }
+
         if (request.getCategoryId() != null) {
             TemplateCategory category = categoryRepository.findById(request.getCategoryId())
                     .orElseThrow(() -> new RuntimeException("Категория не найдена: " + request.getCategoryId()));
@@ -113,6 +123,11 @@ public class TemplateService {
         }
         if (request.getConfiguration() != null) {
             template.setConfiguration(request.getConfiguration());
+        }
+        if (request.getConfigurationUid() != null) {
+            StationConfiguration config = configurationRepository.findById(request.getConfigurationUid())
+                    .orElseThrow(() -> new RuntimeException("Конфигурация не найдена: " + request.getConfigurationUid()));
+            template.setStationConfiguration(config);
         }
         if (request.getCategoryId() != null) {
             TemplateCategory category = categoryRepository.findById(request.getCategoryId())
@@ -143,6 +158,7 @@ public class TemplateService {
         copy.setNamePattern(source.getNamePattern() + " (копия)");
         copy.setNumber(nextNumber);
         copy.setConfiguration(source.getConfiguration());
+        copy.setStationConfiguration(source.getStationConfiguration());
 
         Long targetCategoryId = request.getTargetCategoryId() != null
                 ? request.getTargetCategoryId()
@@ -189,6 +205,19 @@ public class TemplateService {
                 .map(Station::getName)
                 .collect(Collectors.toList());
 
+        StationConfiguration config = template.getStationConfiguration();
+        String configName = null;
+        UUID configUid = null;
+        String modelName = null;
+
+        if (config != null) {
+            configUid = config.getUid();
+            configName = config.getName();
+            if (config.getModel() != null) {
+                modelName = config.getModel().getName();
+            }
+        }
+
         return TemplateDto.builder()
                 .uid(template.getUid())
                 .name(template.getNamePattern())
@@ -196,6 +225,9 @@ public class TemplateService {
                 .categoryId(template.getCategory() != null ? template.getCategory().getId() : null)
                 .categoryName(template.getCategory() != null ? template.getCategory().getName() : null)
                 .configuration(template.getConfiguration())
+                .configurationUid(configUid)
+                .configurationName(configName)
+                .modelName(modelName)
                 .totalCells(template.getTotalCells())
                 .filledCells(template.getFilledCells())
                 .freeCells(template.getFreeCells())

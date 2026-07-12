@@ -16,6 +16,8 @@ import java.util.List;
 public class WorkshopDTO {
     private Long id;
     private String name;
+    private Long holdingId;
+    private String holdingName;
     private Long enterpriseId;
     private List<SectionDTO> sections = new ArrayList<>();
 }
