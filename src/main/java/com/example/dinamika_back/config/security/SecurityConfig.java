@@ -149,6 +149,8 @@ public class SecurityConfig {
                             .requestMatchers("/api/station-models/**").permitAll()
                             .requestMatchers("/api/station-configurations/**").permitAll()
                             .requestMatchers("/api/stations/crud/**").permitAll()
+                            .requestMatchers("/api/orders/**").permitAll()
+                            .requestMatchers("/api/tkp/**").permitAll()
                             .anyRequest().authenticated())
             .sessionManagement(sessionManagement -> sessionManagement
                     .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
@@ -170,7 +172,9 @@ public class SecurityConfig {
                             "/api/station-manufacturers/**",
                             "/api/station-models/**",
                             "/api/station-configurations/**",
-                            "/api/stations/crud/**"
+                            "/api/stations/crud/**",
+                            "/api/orders/**",
+                            "/api/tkp/**"
                     )
                     .sessionAuthenticationStrategy((authentication, request, response) -> {
                     }));
