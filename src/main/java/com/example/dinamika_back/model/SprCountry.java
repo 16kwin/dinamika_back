@@ -1,3 +1,4 @@
+// SprCountry.java — ОБНОВЛЕННЫЙ (без изменений, просто добавляем связь)
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;

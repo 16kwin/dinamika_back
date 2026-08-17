@@ -1,3 +1,4 @@
+// UserService.java — ПОЛНЫЙ ФАЙЛ
 package com.example.dinamika_back.service;
 
 import jakarta.transaction.Transactional;
@@ -141,5 +142,24 @@ public class UserService {
         userRepository.deleteById(id);
     }
 
-
+    public String getCurrentUsername() {
+        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        if (principal instanceof UserDetails) {
+            String username = ((UserDetails) principal).getUsername();
+            Optional<User> user = userRepository.findTop1ByUsername(username);
+            if (user.isPresent()) {
+                String firstName = user.get().getFirstName();
+                String lastName = user.get().getLastName();
+                if (firstName != null && lastName != null) {
+                    return firstName + " " + lastName;
+                } else if (firstName != null) {
+                    return firstName;
+                } else if (lastName != null) {
+                    return lastName;
+                }
+            }
+            return username;
+        }
+        return "Неизвестный пользователь";
+    }
 }

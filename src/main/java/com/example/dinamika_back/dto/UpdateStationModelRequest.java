@@ -22,4 +22,7 @@ public class UpdateStationModelRequest {
     private Integer drums;
     private Integer columnsPerDrum;
     private Integer rowsPerColumn;
+    
+    // Готовая структура ячеек (JSON)
+    private String cellsStructure;
 }

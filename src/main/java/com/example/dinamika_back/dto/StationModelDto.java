@@ -1,7 +1,8 @@
-// StationModelDto.java
+// StationModelDto.java — ОБНОВЛЕННЫЙ (добавлен @Builder)
 package com.example.dinamika_back.dto;
 
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -12,6 +13,7 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class StationModelDto {
     private UUID uid;
     private Integer code;
@@ -23,5 +25,5 @@ public class StationModelDto {
     private UUID manufacturerId;
     private String manufacturerName;
     private String purpose;
-    private String cellsStructure;  // <-- ДОБАВЛЕНО
+    private String cellsStructure;
 }

@@ -1,18 +1,23 @@
-// EnterpriseFlatDto.java
 package com.example.dinamika_back.dto;
 
 import lombok.AllArgsConstructor;
-import lombok.Getter;
+import lombok.Builder;
+import lombok.Data;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
-@Getter
-@Setter
+import java.util.UUID;
+
+@Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class EnterpriseFlatDto {
     private Long id;
     private String name;
+    private String description;
+    private String address;
     private Long holdingId;
     private String holdingName;
+    private UUID locationUid;
+    private String locationName;
 }

@@ -1,4 +1,4 @@
-// TemplateController.java
+// TemplateController.java — ПОЛНЫЙ ФАЙЛ
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
@@ -85,5 +85,34 @@ public class TemplateController {
     @GetMapping("/{uid}/stations")
     public ResponseEntity<List<String>> getTemplateStations(@PathVariable UUID uid) {
         return ResponseEntity.ok(templateService.getTemplateStations(uid));
+    }
+
+    // ==================== ЯЧЕЙКИ ====================
+
+    @GetMapping("/{uid}/cells")
+    public ResponseEntity<List<CellDto>> getTemplateCells(@PathVariable UUID uid) {
+        return ResponseEntity.ok(templateService.getTemplateCells(uid));
+    }
+
+    @PostMapping("/cells")
+    public ResponseEntity<CellDto> createCell(@RequestBody CreateCellRequest request) {
+        return ResponseEntity.ok(templateService.createCell(request));
+    }
+
+    @PutMapping("/cells/{uid}")
+    public ResponseEntity<CellDto> updateCell(@PathVariable UUID uid, @RequestBody CellRequest request) {
+        return ResponseEntity.ok(templateService.updateCell(uid, request));
+    }
+
+    @DeleteMapping("/cells/{uid}")
+    public ResponseEntity<Void> clearCell(@PathVariable UUID uid) {
+        templateService.clearCell(uid);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/cells/clear-batch")
+    public ResponseEntity<Void> clearBatchCells(@RequestBody ClearBatchRequest request) {
+        templateService.clearBatchCells(request);
+        return ResponseEntity.noContent().build();
     }
 }

@@ -1,10 +1,8 @@
+// Holding.java — ОБНОВЛЕННЫЙ (добавлен список предприятий)
 package com.example.dinamika_back.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import lombok.Getter;
-import lombok.Setter;
-
 import jakarta.persistence.*;
+import lombok.*;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,6 +11,9 @@ import java.util.List;
 @Table(name = "holdings")
 @Getter
 @Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class Holding {
 
     @Id
@@ -25,15 +26,18 @@ public class Holding {
     @Column(name = "description")
     private String description;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "location_uuid", referencedColumnName = "uid")
+    private Location location;
+
+    @OneToMany(mappedBy = "holding", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    private List<Enterprise> enterprises = new ArrayList<>();
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
-
-    @OneToMany(mappedBy = "holding", fetch = FetchType.LAZY)
-    @JsonIgnoreProperties("holding")
-    private List<Enterprise> enterprises = new ArrayList<>();
 
     @PrePersist
     protected void onCreate() {

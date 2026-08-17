@@ -2,14 +2,8 @@
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
-import com.example.dinamika_back.model.DocPattern;
-import com.example.dinamika_back.model.Station;
-import com.example.dinamika_back.model.StationConfiguration;
-import com.example.dinamika_back.model.TemplateCategory;
-import com.example.dinamika_back.repository.DocPatternRepository;
-import com.example.dinamika_back.repository.StationConfigurationRepository;
-import com.example.dinamika_back.repository.StationRepository;
-import com.example.dinamika_back.repository.TemplateCategoryRepository;
+import com.example.dinamika_back.model.*;
+import com.example.dinamika_back.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +20,9 @@ public class TemplateService {
     private final TemplateCategoryRepository categoryRepository;
     private final StationRepository stationRepository;
     private final StationConfigurationRepository configurationRepository;
+    private final RegCellsRepository regCellsRepository;
+    private final SprMaterialRepository materialRepository;
+    private final SprTypeMaterialRepository typeMaterialRepository;
 
     // ==================== КАТЕГОРИИ ====================
 
@@ -187,6 +184,118 @@ public class TemplateService {
                 .collect(Collectors.toList());
     }
 
+    // ==================== ЯЧЕЙКИ ШАБЛОНА ====================
+
+    public List<CellDto> getTemplateCells(UUID templateUid) {
+        return regCellsRepository.findByDocPatternUid(templateUid).stream()
+                .map(this::toCellDto)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public CellDto createCell(CreateCellRequest request) {
+        DocPattern template = docPatternRepository.findById(request.getDocPatternUid())
+                .orElseThrow(() -> new RuntimeException("Шаблон не найден: " + request.getDocPatternUid()));
+
+        RegCells cell = new RegCells();
+        cell.setUid(UUID.randomUUID());
+        cell.setDocPattern(template);
+        cell.setQuantity(request.getQuantity());
+        cell.setNumberCell(request.getNumberCell());
+        cell.setColumnNumber(request.getColumnNumber());
+        cell.setDrumNumber(request.getDrumNumber());
+
+        if (request.getMaterialUid() != null) {
+            SprMaterial material = materialRepository.findById(request.getMaterialUid())
+                    .orElseThrow(() -> new RuntimeException("Материал не найден: " + request.getMaterialUid()));
+            cell.setMaterial(material);
+        }
+
+        cell.setPurposeMaterial(request.getPurposeMaterial());
+        cell.setPurposeSgd(request.getPurposeSgd());
+        cell.setMaxQuantity(request.getMaxQuantity());
+
+        if (request.getTypeMainUid() != null) {
+            SprTypeMaterial typeMain = typeMaterialRepository.findById(request.getTypeMainUid())
+                    .orElseThrow(() -> new RuntimeException("Тип материала не найден: " + request.getTypeMainUid()));
+            cell.setTypeMain(typeMain);
+        }
+
+        regCellsRepository.save(cell);
+        recalcTemplateStats(template);
+
+        return toCellDto(cell);
+    }
+
+    @Transactional
+    public CellDto updateCell(UUID cellUid, CellRequest request) {
+        RegCells cell = regCellsRepository.findById(cellUid)
+                .orElseThrow(() -> new RuntimeException("Ячейка не найдена: " + cellUid));
+
+        if (request.getMaterialUid() != null) {
+            SprMaterial material = materialRepository.findById(request.getMaterialUid())
+                    .orElseThrow(() -> new RuntimeException("Материал не найден: " + request.getMaterialUid()));
+            cell.setMaterial(material);
+        } else {
+            cell.setMaterial(null);
+        }
+
+        cell.setQuantity(request.getQuantity());
+        cell.setPurposeMaterial(request.getPurposeMaterial());
+        cell.setPurposeSgd(request.getPurposeSgd());
+        cell.setMaxQuantity(request.getMaxQuantity());
+        cell.setDimensions(request.getDimensions());
+
+        if (request.getTypeMainUid() != null) {
+            SprTypeMaterial typeMain = typeMaterialRepository.findById(request.getTypeMainUid())
+                    .orElseThrow(() -> new RuntimeException("Тип материала не найден: " + request.getTypeMainUid()));
+            cell.setTypeMain(typeMain);
+        }
+
+        regCellsRepository.save(cell);
+        recalcTemplateStats(cell.getDocPattern());
+
+        return toCellDto(cell);
+    }
+
+    @Transactional
+    public void clearCell(UUID cellUid) {
+        RegCells cell = regCellsRepository.findById(cellUid)
+                .orElseThrow(() -> new RuntimeException("Ячейка не найдена: " + cellUid));
+
+        DocPattern template = cell.getDocPattern();
+        cell.clear();
+        regCellsRepository.save(cell);
+        recalcTemplateStats(template);
+    }
+
+    @Transactional
+    public void clearBatchCells(ClearBatchRequest request) {
+        List<RegCells> cells = regCellsRepository.findAllById(request.getCellUids());
+        DocPattern template = null;
+
+        for (RegCells cell : cells) {
+            if (template == null) {
+                template = cell.getDocPattern();
+            }
+            cell.clear();
+        }
+
+        regCellsRepository.saveAll(cells);
+
+        if (template != null) {
+            recalcTemplateStats(template);
+        }
+    }
+
+    private void recalcTemplateStats(DocPattern template) {
+        List<RegCells> cells = regCellsRepository.findByDocPatternUid(template.getUid());
+        long filled = cells.stream().filter(c -> c.getMaterial() != null).count();
+        template.setFilledCells((int) filled);
+        template.setFreeCells(template.getTotalCells() - (int) filled);
+        docPatternRepository.save(template);
+    }
+
     // ==================== МАППИНГ ====================
 
     private TemplateCategoryDto toCategoryDto(TemplateCategory category) {
@@ -235,6 +344,25 @@ public class TemplateService {
                 .updatedAt(template.getUpdatedAt())
                 .active(!stationNames.isEmpty())
                 .stationNames(stationNames)
+                .build();
+    }
+
+    private CellDto toCellDto(RegCells cell) {
+        return CellDto.builder()
+                .uid(cell.getUid())
+                .numberCell(cell.getNumberCell())
+                .columnNumber(cell.getColumnNumber())
+                .drumNumber(cell.getDrumNumber())
+                .materialUid(cell.getMaterial() != null ? cell.getMaterial().getUid() : null)
+                .materialName(cell.getMaterial() != null ? cell.getMaterial().getNameMaterial() : null)
+                .materialArticle(cell.getMaterial() != null ? cell.getMaterial().getArticle() : null)
+                .quantity(cell.getQuantity())
+                .typeMainUid(cell.getTypeMain() != null ? cell.getTypeMain().getUid() : null)
+                .typeMainName(cell.getTypeMain() != null ? cell.getTypeMain().getTypeName() : null)
+                .purposeMaterial(cell.getPurposeMaterial())
+                .purposeSgd(cell.getPurposeSgd())
+                .maxQuantity(cell.getMaxQuantity())
+                .dimensions(cell.getDimensions())
                 .build();
     }
 }

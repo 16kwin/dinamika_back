@@ -1,12 +1,13 @@
-// CreateEnterpriseRequest.java
 package com.example.dinamika_back.dto;
 
-import lombok.Getter;
-import lombok.Setter;
+import lombok.Data;
+import java.util.UUID;
 
-@Getter
-@Setter
+@Data
 public class CreateEnterpriseRequest {
     private String name;
+    private String description;
+    private String address;
     private Long holdingId;
+    private UUID locationUid;
 }

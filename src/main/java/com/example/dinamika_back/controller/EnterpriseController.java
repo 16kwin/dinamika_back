@@ -1,15 +1,15 @@
-// EnterpriseController.java
+// EnterpriseController.java — ПОЛНЫЙ ФАЙЛ (с getAllWithSettings)
 package com.example.dinamika_back.controller;
 
-import com.example.dinamika_back.dto.CreateEnterpriseRequest;
-import com.example.dinamika_back.dto.EnterpriseFlatDto;
-import com.example.dinamika_back.dto.UpdateEnterpriseRequest;
+import com.example.dinamika_back.dto.*;
 import com.example.dinamika_back.service.EnterpriseService;
+import com.example.dinamika_back.service.EnterpriseColumnSettingsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/enterprises")
@@ -17,13 +17,23 @@ import java.util.List;
 public class EnterpriseController {
 
     private final EnterpriseService enterpriseService;
+    private final EnterpriseColumnSettingsService columnSettingsService;
+
+    // ==================== CRUD ====================
 
     @GetMapping
-    public ResponseEntity<List<EnterpriseFlatDto>> getAll(@RequestParam(required = false) Long holdingId) {
+    public ResponseEntity<EnterpriseListResponse> getAll(@RequestParam(required = false) Integer userId,
+                                                          @RequestParam(required = false) Long holdingId) {
         if (holdingId != null) {
-            return ResponseEntity.ok(enterpriseService.getByHoldingId(holdingId));
+            List<EnterpriseFlatDto> byHolding = enterpriseService.getByHoldingId(holdingId);
+            EnterpriseListResponse response = new EnterpriseListResponse();
+            response.setColumns(List.of("name", "description", "address", "holdingName", "locationName"));
+            response.setData(byHolding);
+            response.setColumnWidths(Map.of());
+            response.setRequiredColumns(List.of("name"));
+            return ResponseEntity.ok(response);
         }
-        return ResponseEntity.ok(enterpriseService.getAll());
+        return ResponseEntity.ok(enterpriseService.getAllWithSettings(userId));
     }
 
     @GetMapping("/{id}")
@@ -44,6 +54,74 @@ public class EnterpriseController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         enterpriseService.delete(id);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== Events ====================
+
+    @GetMapping("/events")
+    public ResponseEntity<List<EnterpriseEventLogDto>> getAllEvents() {
+        return ResponseEntity.ok(enterpriseService.getAllEvents());
+    }
+
+    @GetMapping("/{id}/events")
+    public ResponseEntity<List<EnterpriseEventLogDto>> getEvents(@PathVariable Long id) {
+        return ResponseEntity.ok(enterpriseService.getEvents(id));
+    }
+
+    // ==================== All Settings ====================
+
+    @GetMapping("/settings")
+    public ResponseEntity<Map<String, String>> getAllSettings(@RequestParam Integer userId) {
+        Map<String, String> settings = Map.of(
+                "columnsJson", columnSettingsService.getColumnsJson(userId) != null
+                        ? columnSettingsService.getColumnsJson(userId) : "{}",
+                "filtersJson", columnSettingsService.getFiltersJson(userId),
+                "sortJson", columnSettingsService.getSortJson(userId)
+        );
+        return ResponseEntity.ok(settings);
+    }
+
+    // ==================== Column Settings ====================
+
+    @GetMapping("/columns-settings")
+    public ResponseEntity<String> getColumnsSettings(@RequestParam Integer userId) {
+        String json = columnSettingsService.getColumnsJson(userId);
+        return ResponseEntity.ok(json != null ? json : "{}");
+    }
+
+    @PatchMapping("/columns-settings")
+    public ResponseEntity<Void> saveColumnsSettings(@RequestParam Integer userId, @RequestBody Map<String, Object> body) {
+        String columnsJson = (String) body.get("columnsJson");
+        columnSettingsService.saveColumnsJson(userId, columnsJson);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== Filters Settings ====================
+
+    @GetMapping("/filters-settings")
+    public ResponseEntity<String> getFiltersSettings(@RequestParam Integer userId) {
+        return ResponseEntity.ok(columnSettingsService.getFiltersJson(userId));
+    }
+
+    @PatchMapping("/filters-settings")
+    public ResponseEntity<Void> saveFiltersSettings(@RequestParam Integer userId, @RequestBody Map<String, Object> body) {
+        String filtersJson = (String) body.get("filtersJson");
+        columnSettingsService.saveFiltersJson(userId, filtersJson);
+        return ResponseEntity.ok().build();
+    }
+
+    // ==================== Sort Settings ====================
+
+    @GetMapping("/sort-settings")
+    public ResponseEntity<String> getSortSettings(@RequestParam Integer userId) {
+        return ResponseEntity.ok(columnSettingsService.getSortJson(userId));
+    }
+
+    @PatchMapping("/sort-settings")
+    public ResponseEntity<Void> saveSortSettings(@RequestParam Integer userId, @RequestBody Map<String, Object> body) {
+        String sortJson = (String) body.get("sortJson");
+        columnSettingsService.saveSortJson(userId, sortJson);
         return ResponseEntity.ok().build();
     }
 }

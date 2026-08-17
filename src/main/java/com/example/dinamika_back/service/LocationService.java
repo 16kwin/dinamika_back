@@ -1,4 +1,4 @@
-// LocationService.java
+// LocationService.java — ОБНОВЛЕННЫЙ (без ошибок)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -36,6 +36,11 @@ public class LocationService {
         dto.setName(holding.getName());
         dto.setDescription(holding.getDescription());
 
+        if (holding.getLocation() != null) {
+            dto.setLocationUid(holding.getLocation().getUid());
+            dto.setLocationName(holding.getLocation().getName());
+        }
+
         List<EnterpriseDTO> enterpriseDTOs = holding.getEnterprises().stream()
                 .map(this::convertToEnterpriseDTO)
                 .collect(Collectors.toList());
@@ -50,6 +55,11 @@ public class LocationService {
         dto.setName(enterprise.getName());
         dto.setHoldingId(enterprise.getHolding() != null ? enterprise.getHolding().getId() : null);
         dto.setHoldingName(enterprise.getHolding() != null ? enterprise.getHolding().getName() : null);
+
+        if (enterprise.getLocation() != null) {
+            dto.setLocationUid(enterprise.getLocation().getUid());
+            dto.setLocationName(enterprise.getLocation().getName());
+        }
 
         List<WorkshopDTO> workshopDTOs = enterprise.getWorkshops().stream()
                 .map(this::convertToWorkshopDTO)
@@ -68,6 +78,11 @@ public class LocationService {
                 ? workshop.getEnterprise().getHolding().getId() : null);
         dto.setHoldingName(workshop.getEnterprise().getHolding() != null
                 ? workshop.getEnterprise().getHolding().getName() : null);
+
+        if (workshop.getLocation() != null) {
+            dto.setLocationUid(workshop.getLocation().getUid());
+            dto.setLocationName(workshop.getLocation().getName());
+        }
 
         List<SectionDTO> sectionDTOs = workshop.getSections().stream()
                 .map(this::convertToSectionDTO)

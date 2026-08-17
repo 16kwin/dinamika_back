@@ -1,9 +1,10 @@
-// CreateStationModelRequest.java
+// CreateStationModelRequest.java — ПОЛНЫЙ ФАЙЛ
 package com.example.dinamika_back.dto;
 
 import lombok.Getter;
 import lombok.Setter;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Getter
@@ -17,10 +18,13 @@ public class CreateStationModelRequest {
     private UUID manufacturerId;
     private String purpose;
     
-    // Параметры для генерации сетки ячеек
-    private Integer columns;          // для постамата: количество колонок
-    private Integer cellsPerColumn;   // для постамата: ячеек в колонке
-    private Integer drums;            // для барабана: количество барабанов
-    private Integer columnsPerDrum;   // для барабана: колонок в барабане
-    private Integer rowsPerColumn;    // для барабана: строк в колонке
+    // Параметры для генерации сетки
+    private Integer columns;
+    private Integer cellsPerColumn;
+    private Integer drums;
+    private Integer columnsPerDrum;
+    private Integer rowsPerColumn;
+    
+    // Готовая структура ячеек (JSON)
+    private String cellsStructure;
 }

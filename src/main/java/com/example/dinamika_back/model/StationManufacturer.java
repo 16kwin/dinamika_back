@@ -1,4 +1,4 @@
-// StationManufacturer.java
+// StationManufacturer.java — ОБНОВЛЕННЫЙ (ссылка на SprCountry)
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
@@ -25,6 +25,10 @@ public class StationManufacturer {
 
     @Column(name = "description", length = 500)
     private String description;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "country_uuid", referencedColumnName = "uid")
+    private SprCountry country;
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

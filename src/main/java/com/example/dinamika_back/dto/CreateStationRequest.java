@@ -36,4 +36,6 @@ public class CreateStationRequest {
     
     private String ipAddress;
     private Integer networkPort;
+    
+    private String author;
 }
