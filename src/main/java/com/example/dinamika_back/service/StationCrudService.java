@@ -1,4 +1,4 @@
-// StationCrudService.java — ПОЛНЫЙ ФАЙЛ (с requiredColumns)
+// StationCrudService.java — ПОЛНЫЙ ФАЙЛ (исправлен getAllEvents - фильтрация всех детальных событий)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -43,9 +43,6 @@ public class StationCrudService {
     // ==================== GET ALL ====================
 
     public StationListResponse getAll(Integer userId) {
-        long startTotal = System.nanoTime();
-
-        long startSettings = System.nanoTime();
         String columnsJson = columnSettingsService.getColumnsJson(userId);
         Set<String> visibleColumns = new LinkedHashSet<>();
         Map<String, Double> columnWidths = new HashMap<>();
@@ -56,32 +53,19 @@ public class StationCrudService {
         } else {
             visibleColumns = new LinkedHashSet<>(ALL_COLUMNS_ORDER);
         }
-        long timeSettings = (System.nanoTime() - startSettings) / 1000;
-        System.out.println("  [Этап 1] Получение настроек: " + timeSettings + " мкс");
 
-        long startQuery = System.nanoTime();
-        List<Station> stations = stationRepository.findAllWithRelations();
-        long timeQuery = (System.nanoTime() - startQuery) / 1000;
-        System.out.println("  [Этап 2] Запрос к БД (FULL): " + timeQuery + " мкс");
-
-        long startBuild = System.nanoTime();
-        
         List<String> orderedColumns = ALL_COLUMNS_ORDER.stream()
                 .filter(visibleColumns::contains)
                 .collect(Collectors.toList());
 
+        List<Station> stations = stationRepository.findAllWithRelations();
+
         List<Map<String, Object>> data = stations.stream()
                 .map(this::buildFullRowData)
                 .collect(Collectors.toList());
-        
-        long timeBuild = (System.nanoTime() - startBuild) / 1000;
-        System.out.println("  [Этап 3] Формирование ответа: " + timeBuild + " мкс");
 
         StationListResponse response = new StationListResponse(orderedColumns, data, columnWidths);
         response.setRequiredColumns(new ArrayList<>(requiredColumns));
-
-        long timeTotal = (System.nanoTime() - startTotal) / 1000;
-        System.out.println("[StationCrudService.getAll] ИТОГО: " + timeTotal + " мкс (" + stations.size() + " станций, показано " + visibleColumns.size() + " колонок)");
 
         return response;
     }
@@ -125,14 +109,9 @@ public class StationCrudService {
     // ==================== GET BY UID ====================
 
     public StationDto getByUid(String uid) {
-        long start = System.nanoTime();
         Station station = stationRepository.findByUid(uid)
                 .orElseThrow(() -> new RuntimeException("Станция не найдена: " + uid));
-        StationDto result = toDTO(station);
-        long end = System.nanoTime();
-        long durationMicros = (end - start) / 1000;
-        System.out.println("[StationCrudService.getByUid] Время выполнения: " + durationMicros + " мкс (uid=" + uid + ")");
-        return result;
+        return toDTO(station);
     }
 
     // ==================== GENERATE CODE ====================
@@ -146,7 +125,6 @@ public class StationCrudService {
 
     @Transactional
     public StationDto create(CreateStationRequest request) {
-        long start = System.nanoTime();
         Station station = new Station();
         station.setUid(request.getUid());
         station.setCode(request.getUid() != null && stationRepository.existsByUid(request.getUid())
@@ -216,95 +194,144 @@ public class StationCrudService {
 
         station = stationRepository.save(station);
 
-        logEvent(station.getUid(), "CREATE", "Создание станции", null, null, null, userService.getCurrentUsername());
+        logEvent(station.getUid(), "CREATE", "Создание станции: '" + station.getName() + "'", null, null, null, userService.getCurrentUsername());
 
-        StationDto result = toDTO(station);
-        long end = System.nanoTime();
-        long durationMicros = (end - start) / 1000;
-        System.out.println("[StationCrudService.create] Время выполнения: " + durationMicros + " мкс (uid=" + station.getUid() + ")");
-        return result;
+        return toDTO(station);
     }
 
     // ==================== UPDATE ====================
 
     @Transactional
     public StationDto update(String uid, UpdateStationRequest request) {
-        long start = System.nanoTime();
         Station station = stationRepository.findByUid(uid)
                 .orElseThrow(() -> new RuntimeException("Станция не найдена: " + uid));
 
         String author = userService.getCurrentUsername();
 
         if (request.getName() != null && !request.getName().equals(station.getName())) {
-            logFieldChange(uid, "Наименование", station.getName(), request.getName(), author);
+            String oldName = station.getName();
+            logEvent(uid, "UPDATE", "'" + oldName + "': Значение поля 'Наименование' изменено с '" + oldName + "' на '" + request.getName() + "'",
+                    "Наименование", oldName, request.getName(), author);
             station.setName(request.getName());
         }
         if (request.getDescription() != null && !Objects.equals(request.getDescription(), station.getDescription())) {
-            logFieldChange(uid, "Описание", station.getDescription(), request.getDescription(), author);
+            String currentName = station.getName();
+            String oldVal = station.getDescription() != null ? station.getDescription() : "null";
+            String newVal = request.getDescription() != null ? request.getDescription() : "null";
+            logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Описание' изменено с '" + oldVal + "' на '" + newVal + "'",
+                    "Описание", oldVal, newVal, author);
             station.setDescription(request.getDescription());
         }
         if (request.getProductionDate() != null && !Objects.equals(request.getProductionDate(), station.getProductionDate())) {
-            logFieldChange(uid, "Дата производства", station.getProductionDate(), request.getProductionDate(), author);
+            String currentName = station.getName();
+            String oldVal = station.getProductionDate() != null ? station.getProductionDate().toString() : "null";
+            String newVal = request.getProductionDate() != null ? request.getProductionDate().toString() : "null";
+            logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Дата производства' изменено с '" + oldVal + "' на '" + newVal + "'",
+                    "Дата производства", oldVal, newVal, author);
             station.setProductionDate(request.getProductionDate());
         }
         if (request.getSerialNumber() != null && !Objects.equals(request.getSerialNumber(), station.getSerialNumber())) {
-            logFieldChange(uid, "Серийный номер", station.getSerialNumber(), request.getSerialNumber(), author);
+            String currentName = station.getName();
+            String oldVal = station.getSerialNumber() != null ? station.getSerialNumber() : "null";
+            String newVal = request.getSerialNumber() != null ? request.getSerialNumber() : "null";
+            logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Серийный номер' изменено с '" + oldVal + "' на '" + newVal + "'",
+                    "Серийный номер", oldVal, newVal, author);
             station.setSerialNumber(request.getSerialNumber());
         }
 
         if (request.getStatus() != null) {
             String oldStatus = station.getStatus() != null ? station.getStatus().name() : null;
             if (!request.getStatus().equals(oldStatus)) {
-                logFieldChange(uid, "Статус", oldStatus, request.getStatus(), author);
+                String currentName = station.getName();
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Статус' изменено с '" + oldStatus + "' на '" + request.getStatus() + "'",
+                        "Статус", oldStatus, request.getStatus(), author);
                 station.setStatus(StationStatus.valueOf(request.getStatus()));
             }
         }
 
         if (request.getIpAddress() != null && !Objects.equals(request.getIpAddress(), station.getIpAddress())) {
-            logFieldChange(uid, "IP-адрес", station.getIpAddress(), request.getIpAddress(), author);
+            String currentName = station.getName();
+            String oldVal = station.getIpAddress() != null ? station.getIpAddress() : "null";
+            String newVal = request.getIpAddress() != null ? request.getIpAddress() : "null";
+            logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'IP-адрес' изменено с '" + oldVal + "' на '" + newVal + "'",
+                    "IP-адрес", oldVal, newVal, author);
             station.setIpAddress(request.getIpAddress());
         }
         if (request.getNetworkPort() != null && !Objects.equals(request.getNetworkPort(), station.getNetworkPort())) {
-            logFieldChange(uid, "Порт", station.getNetworkPort(), request.getNetworkPort(), author);
+            String currentName = station.getName();
+            String oldVal = station.getNetworkPort() != null ? String.valueOf(station.getNetworkPort()) : "null";
+            String newVal = request.getNetworkPort() != null ? String.valueOf(request.getNetworkPort()) : "null";
+            logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Порт' изменено с '" + oldVal + "' на '" + newVal + "'",
+                    "Порт", oldVal, newVal, author);
             station.setNetworkPort(request.getNetworkPort());
         }
         if (request.getParentUid() != null && !Objects.equals(request.getParentUid(), station.getParentUid())) {
-            logFieldChange(uid, "Родительская станция", station.getParentUid(), request.getParentUid(), author);
+            String currentName = station.getName();
+            String oldVal = station.getParentUid() != null ? station.getParentUid() : "null";
+            String newVal = request.getParentUid() != null ? request.getParentUid() : "null";
+            logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Родительская станция' изменено с '" + oldVal + "' на '" + newVal + "'",
+                    "Родительская станция", oldVal, newVal, author);
             station.setParentUid(request.getParentUid());
         }
 
         if (request.getIsAdditionalModule() != null && !Objects.equals(request.getIsAdditionalModule(), station.getIsAdditionalModule())) {
-            logFieldChange(uid, "Доп. модуль", station.getIsAdditionalModule(), request.getIsAdditionalModule(), author);
+            String currentName = station.getName();
+            String oldVal = String.valueOf(station.getIsAdditionalModule());
+            String newVal = String.valueOf(request.getIsAdditionalModule());
+            logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Доп. модуль' изменено с '" + oldVal + "' на '" + newVal + "'",
+                    "Доп. модуль", oldVal, newVal, author);
             station.setIsAdditionalModule(request.getIsAdditionalModule());
         }
         if (request.getHasAdditionalModule() != null && !Objects.equals(request.getHasAdditionalModule(), station.getHasAdditionalModule())) {
-            logFieldChange(uid, "Имеет доп. модуль", station.getHasAdditionalModule(), request.getHasAdditionalModule(), author);
+            String currentName = station.getName();
+            String oldVal = String.valueOf(station.getHasAdditionalModule());
+            String newVal = String.valueOf(request.getHasAdditionalModule());
+            logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Имеет доп. модуль' изменено с '" + oldVal + "' на '" + newVal + "'",
+                    "Имеет доп. модуль", oldVal, newVal, author);
             station.setHasAdditionalModule(request.getHasAdditionalModule());
         }
         if (request.getHasError() != null && !Objects.equals(request.getHasError(), station.getHasError())) {
-            logFieldChange(uid, "Ошибка", station.getHasError(), request.getHasError(), author);
+            String currentName = station.getName();
+            String oldVal = String.valueOf(station.getHasError());
+            String newVal = String.valueOf(request.getHasError());
+            logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Ошибка' изменено с '" + oldVal + "' на '" + newVal + "'",
+                    "Ошибка", oldVal, newVal, author);
             station.setHasError(request.getHasError());
         }
         if (request.getIsTmc() != null && !Objects.equals(request.getIsTmc(), station.getIsTmc())) {
-            logFieldChange(uid, "ТМЦ", station.getIsTmc(), request.getIsTmc(), author);
+            String currentName = station.getName();
+            String oldVal = String.valueOf(station.getIsTmc());
+            String newVal = String.valueOf(request.getIsTmc());
+            logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'ТМЦ' изменено с '" + oldVal + "' на '" + newVal + "'",
+                    "ТМЦ", oldVal, newVal, author);
             station.setIsTmc(request.getIsTmc());
         }
         if (request.getIsSgd() != null && !Objects.equals(request.getIsSgd(), station.getIsSgd())) {
-            logFieldChange(uid, "СГД", station.getIsSgd(), request.getIsSgd(), author);
+            String currentName = station.getName();
+            String oldVal = String.valueOf(station.getIsSgd());
+            String newVal = String.valueOf(request.getIsSgd());
+            logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'СГД' изменено с '" + oldVal + "' на '" + newVal + "'",
+                    "СГД", oldVal, newVal, author);
             station.setIsSgd(request.getIsSgd());
         }
         if (request.getIsOk() != null && !Objects.equals(request.getIsOk(), station.getIsOk())) {
-            logFieldChange(uid, "ОК", station.getIsOk(), request.getIsOk(), author);
+            String currentName = station.getName();
+            String oldVal = String.valueOf(station.getIsOk());
+            String newVal = String.valueOf(request.getIsOk());
+            logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'ОК' изменено с '" + oldVal + "' на '" + newVal + "'",
+                    "ОК", oldVal, newVal, author);
             station.setIsOk(request.getIsOk());
         }
 
         if (request.getModelId() != null) {
             String oldModelId = station.getModel() != null ? station.getModel().getUid().toString() : null;
             if (!request.getModelId().equals(oldModelId)) {
-                String oldModelName = station.getModel() != null ? station.getModel().getName() : null;
+                String oldModelName = station.getModel() != null ? station.getModel().getName() : "null";
                 StationModel newModel = modelRepository.findById(java.util.UUID.fromString(request.getModelId()))
                         .orElseThrow(() -> new RuntimeException("Модель не найдена: " + request.getModelId()));
-                logFieldChange(uid, "Модель", oldModelName, newModel.getName(), author);
+                String currentName = station.getName();
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Модель' изменено с '" + oldModelName + "' на '" + newModel.getName() + "'",
+                        "Модель", oldModelName, newModel.getName(), author);
                 station.setModel(newModel);
             }
         }
@@ -312,76 +339,78 @@ public class StationCrudService {
         if (request.getConfigurationUid() != null) {
             String oldConfigUid = station.getConfiguration() != null ? station.getConfiguration().getUid().toString() : null;
             if (!request.getConfigurationUid().equals(oldConfigUid)) {
-                String oldConfigName = station.getConfiguration() != null ? station.getConfiguration().getName() : null;
+                String oldConfigName = station.getConfiguration() != null ? station.getConfiguration().getName() : "null";
                 StationConfiguration newConfig = configurationRepository.findById(java.util.UUID.fromString(request.getConfigurationUid()))
                         .orElseThrow(() -> new RuntimeException("Конфигурация не найдена: " + request.getConfigurationUid()));
-                logFieldChange(uid, "Конфигурация", oldConfigName, newConfig.getName(), author);
+                String currentName = station.getName();
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Конфигурация' изменено с '" + oldConfigName + "' на '" + newConfig.getName() + "'",
+                        "Конфигурация", oldConfigName, newConfig.getName(), author);
                 station.setConfiguration(newConfig);
             }
         }
 
         if (request.getHoldingId() != null) {
-            String oldHoldingName = station.getHolding() != null ? station.getHolding().getName() : null;
+            String oldHoldingName = station.getHolding() != null ? station.getHolding().getName() : "null";
             Holding newHolding = holdingRepository.findById(request.getHoldingId())
                     .orElseThrow(() -> new RuntimeException("Холдинг не найден: " + request.getHoldingId()));
             if (!Objects.equals(newHolding.getName(), oldHoldingName)) {
-                logFieldChange(uid, "Холдинг", oldHoldingName, newHolding.getName(), author);
+                String currentName = station.getName();
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Холдинг' изменено с '" + oldHoldingName + "' на '" + newHolding.getName() + "'",
+                        "Холдинг", oldHoldingName, newHolding.getName(), author);
                 station.setHolding(newHolding);
             }
         }
 
         if (request.getEnterpriseId() != null) {
-            String oldEnterpriseName = station.getEnterprise() != null ? station.getEnterprise().getName() : null;
+            String oldEnterpriseName = station.getEnterprise() != null ? station.getEnterprise().getName() : "null";
             Enterprise newEnterprise = enterpriseRepository.findById(request.getEnterpriseId())
                     .orElseThrow(() -> new RuntimeException("Предприятие не найдено: " + request.getEnterpriseId()));
             if (!Objects.equals(newEnterprise.getName(), oldEnterpriseName)) {
-                logFieldChange(uid, "Предприятие", oldEnterpriseName, newEnterprise.getName(), author);
+                String currentName = station.getName();
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Предприятие' изменено с '" + oldEnterpriseName + "' на '" + newEnterprise.getName() + "'",
+                        "Предприятие", oldEnterpriseName, newEnterprise.getName(), author);
                 station.setEnterprise(newEnterprise);
             }
         }
 
         if (request.getWorkshopId() != null) {
-            String oldWorkshopName = station.getWorkshop() != null ? station.getWorkshop().getName() : null;
+            String oldWorkshopName = station.getWorkshop() != null ? station.getWorkshop().getName() : "null";
             Workshop newWorkshop = workshopRepository.findById(request.getWorkshopId())
                     .orElseThrow(() -> new RuntimeException("Цех не найден: " + request.getWorkshopId()));
             if (!Objects.equals(newWorkshop.getName(), oldWorkshopName)) {
-                logFieldChange(uid, "Цех", oldWorkshopName, newWorkshop.getName(), author);
+                String currentName = station.getName();
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Цех' изменено с '" + oldWorkshopName + "' на '" + newWorkshop.getName() + "'",
+                        "Цех", oldWorkshopName, newWorkshop.getName(), author);
                 station.setWorkshop(newWorkshop);
             }
         }
 
         if (request.getSectionId() != null) {
-            String oldSectionName = station.getSection() != null ? station.getSection().getName() : null;
+            String oldSectionName = station.getSection() != null ? station.getSection().getName() : "null";
             Section newSection = sectionRepository.findById(request.getSectionId())
                     .orElseThrow(() -> new RuntimeException("Участок не найден: " + request.getSectionId()));
             if (!Objects.equals(newSection.getName(), oldSectionName)) {
-                logFieldChange(uid, "Участок", oldSectionName, newSection.getName(), author);
+                String currentName = station.getName();
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Участок' изменено с '" + oldSectionName + "' на '" + newSection.getName() + "'",
+                        "Участок", oldSectionName, newSection.getName(), author);
                 station.setSection(newSection);
             }
         }
 
         station = stationRepository.save(station);
-        StationDto result = toDTO(station);
-        long end = System.nanoTime();
-        long durationMicros = (end - start) / 1000;
-        System.out.println("[StationCrudService.update] Время выполнения: " + durationMicros + " мкс (uid=" + uid + ")");
-        return result;
+        return toDTO(station);
     }
 
     // ==================== DELETE ====================
 
     @Transactional
     public void delete(String uid) {
-        long start = System.nanoTime();
         Station station = stationRepository.findByUid(uid)
                 .orElseThrow(() -> new RuntimeException("Станция не найдена: " + uid));
 
-        logEvent(uid, "DELETE", "Удаление станции", null, null, null, userService.getCurrentUsername());
+        logEvent(uid, "DELETE", "Удаление станции: '" + station.getName() + "'", null, station.getName(), null, userService.getCurrentUsername());
 
         stationRepository.delete(station);
-        long end = System.nanoTime();
-        long durationMicros = (end - start) / 1000;
-        System.out.println("[StationCrudService.delete] Время выполнения: " + durationMicros + " мкс (uid=" + uid + ")");
     }
 
     // ==================== EVENTS ====================
@@ -394,6 +423,13 @@ public class StationCrudService {
 
     public List<StationEventLogDto> getAllEvents() {
         return eventLogRepository.findAllByOrderByCreatedAtDesc().stream()
+                .filter(e -> !"DOCUMENT_ADD".equals(e.getEventType()) 
+                        && !"DOCUMENT_DELETE".equals(e.getEventType())
+                        && !"DOCUMENT_RENAME".equals(e.getEventType())
+                        && !"STRUCTURE_CREATE".equals(e.getEventType())
+                        && !"STRUCTURE_UPDATE".equals(e.getEventType())
+                        && !"IMAGE_ADD".equals(e.getEventType())
+                        && !"IMAGE_DELETE".equals(e.getEventType()))
                 .map(this::toEventDTO)
                 .collect(Collectors.toList());
     }
@@ -415,25 +451,6 @@ public class StationCrudService {
                 .createdAt(LocalDateTime.now())
                 .build();
         eventLogRepository.save(log);
-    }
-
-    private void logFieldChange(String stationUid, String fieldName, Object oldValue, Object newValue, String author) {
-        String oldStr = oldValue != null ? oldValue.toString() : null;
-        String newStr = newValue != null ? newValue.toString() : null;
-
-        if (oldStr == null && newStr == null) return;
-        if (oldStr != null && oldStr.equals(newStr)) return;
-
-        if (oldStr == null && newStr != null) {
-            logEvent(stationUid, "UPDATE", "Значение поля '" + fieldName + "' установлено: " + newStr,
-                    fieldName, null, newStr, author);
-        } else if (newStr == null && oldStr != null) {
-            logEvent(stationUid, "UPDATE", "Значение поля '" + fieldName + "' очищено",
-                    fieldName, oldStr, null, author);
-        } else {
-            logEvent(stationUid, "UPDATE", "Значение поля '" + fieldName + "' изменено с '" + oldStr + "' на '" + newStr + "'",
-                    fieldName, oldStr, newStr, author);
-        }
     }
 
     // ==================== PRIVATE: DTO / MAPPING ====================

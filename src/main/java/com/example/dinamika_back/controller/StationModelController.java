@@ -1,4 +1,4 @@
-// StationModelController.java — ПОЛНЫЙ ФАЙЛ (с getAllWithSettings)
+// StationModelController.java — ПОЛНЫЙ ФАЙЛ (добавлен renameDocument)
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
@@ -91,6 +91,13 @@ public class StationModelController {
             @RequestParam("documentName") String documentName) {
         try { return ResponseEntity.ok(stationModelService.uploadDocument(modelUid, documentName, file)); }
         catch (IOException e) { return ResponseEntity.internalServerError().build(); }
+    }
+
+    @PatchMapping("/documents/{documentUid}/rename")
+    public ResponseEntity<StationModelDocumentDto> renameDocument(
+            @PathVariable UUID documentUid,
+            @RequestParam("documentName") String documentName) {
+        return ResponseEntity.ok(stationModelService.renameDocument(documentUid, documentName));
     }
 
     @DeleteMapping("/documents/{documentUid}")

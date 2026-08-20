@@ -1,3 +1,4 @@
+// StationDocumentController.java — ПОЛНЫЙ ФАЙЛ (добавлен эндпоинт переименования)
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.StationDocumentDto;
@@ -30,9 +31,19 @@ public class StationDocumentController {
         return ResponseEntity.ok(documentService.uploadDocument(stationUid, documentName, file));
     }
 
+    @PatchMapping("/{documentUid}/rename")
+    public ResponseEntity<StationDocumentDto> renameDocument(
+            @PathVariable String stationUid,
+            @PathVariable String documentUid,
+            @RequestParam("documentName") String documentName) {
+        return ResponseEntity.ok(documentService.renameDocument(stationUid, documentUid, documentName));
+    }
+
     @DeleteMapping("/{documentUid}")
-    public ResponseEntity<Void> deleteDocument(@PathVariable UUID documentUid) {
-        documentService.deleteDocument(documentUid);
+    public ResponseEntity<Void> deleteDocument(
+            @PathVariable String stationUid,
+            @PathVariable UUID documentUid) {
+        documentService.deleteDocument(stationUid, documentUid);
         return ResponseEntity.ok().build();
     }
 }

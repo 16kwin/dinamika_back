@@ -1,4 +1,4 @@
-// CountryCrudService.java — ПОЛНЫЙ ФАЙЛ (добавлен getAllWithSettings)
+// CountryCrudService.java — ПОЛНЫЙ ФАЙЛ (добавлено логирование в производителей)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.CountryEventLogDto;
@@ -6,9 +6,13 @@ import com.example.dinamika_back.dto.CountryListResponse;
 import com.example.dinamika_back.dto.SprCountryDTO;
 import com.example.dinamika_back.model.CountryEventLog;
 import com.example.dinamika_back.model.SprCountry;
+import com.example.dinamika_back.model.StationManufacturer;
+import com.example.dinamika_back.model.StationManufacturerEventLog;
 import com.example.dinamika_back.model.UserCountryColumnSettings;
 import com.example.dinamika_back.repository.CountryEventLogRepository;
 import com.example.dinamika_back.repository.SprCountryRepository;
+import com.example.dinamika_back.repository.StationManufacturerEventLogRepository;
+import com.example.dinamika_back.repository.StationManufacturerRepository;
 import com.example.dinamika_back.repository.UserCountryColumnSettingsRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,6 +31,9 @@ public class CountryCrudService {
     private final SprCountryRepository countryRepository;
     private final CountryEventLogRepository eventLogRepository;
     private final UserCountryColumnSettingsRepository columnSettingsRepository;
+    private final UserService userService;
+    private final StationManufacturerRepository manufacturerRepository;
+    private final StationManufacturerEventLogRepository manufacturerEventLogRepository;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final List<String> ALL_COLUMNS_ORDER = List.of("name");
@@ -120,7 +127,7 @@ public class CountryCrudService {
         country.setName(name);
         country = countryRepository.save(country);
 
-        logEvent(country.getUid(), "CREATE", "Создание страны", null, null, null, "Система");
+        logEvent(country.getUid(), "CREATE", "Создание страны: '" + name + "'", null, null, null, userService.getCurrentUsername());
 
         return toDTO(country);
     }
@@ -130,9 +137,21 @@ public class CountryCrudService {
         SprCountry country = countryRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Страна не найдена: " + uid));
 
+        String author = userService.getCurrentUsername();
+
         if (name != null && !name.isBlank() && !country.getName().equals(name)) {
-            logFieldChange(uid, "Наименование", country.getName(), name, "Система");
+            String oldName = country.getName();
+            logEvent(uid, "UPDATE", "'" + oldName + "': Значение поля 'Наименование' изменено с '" + oldName + "' на '" + name + "'",
+                    "Наименование", oldName, name, author);
             country.setName(name);
+
+            // Логируем в историю производителей
+            List<StationManufacturer> relatedManufacturers = manufacturerRepository.findByCountryUid(uid);
+            for (StationManufacturer manufacturer : relatedManufacturers) {
+                logManufacturerEvent(manufacturer.getUid(), "UPDATE",
+                        "'" + manufacturer.getName() + "': Значение поля 'Страна' изменено с '" + oldName + "' на '" + name + "' через справочник 'Страны'",
+                        "Страна", oldName, name, author);
+            }
         }
 
         country = countryRepository.save(country);
@@ -144,7 +163,18 @@ public class CountryCrudService {
         SprCountry country = countryRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Страна не найдена: " + uid));
 
-        logEvent(uid, "DELETE", "Удаление страны", null, country.getName(), null, "Система");
+        String author = userService.getCurrentUsername();
+        String countryName = country.getName();
+
+        // Логируем в историю производителей
+        List<StationManufacturer> relatedManufacturers = manufacturerRepository.findByCountryUid(uid);
+        for (StationManufacturer manufacturer : relatedManufacturers) {
+            logManufacturerEvent(manufacturer.getUid(), "UPDATE",
+                    "'" + manufacturer.getName() + "': Значение поля 'Страна' изменено с '" + countryName + "' на 'null' через справочник 'Страны'",
+                    "Страна", countryName, null, author);
+        }
+
+        logEvent(uid, "DELETE", "Удаление страны: '" + countryName + "'", null, countryName, null, author);
         countryRepository.delete(country);
     }
 
@@ -232,20 +262,21 @@ public class CountryCrudService {
         eventLogRepository.save(log);
     }
 
-    private void logFieldChange(UUID countryUid, String fieldName, String oldValue, String newValue, String author) {
-        if (oldValue == null && newValue == null) return;
-        if (oldValue != null && oldValue.equals(newValue)) return;
-
-        if (oldValue == null && newValue != null) {
-            logEvent(countryUid, "UPDATE", "Значение поля '" + fieldName + "' установлено: " + newValue,
-                    fieldName, null, newValue, author);
-        } else if (newValue == null && oldValue != null) {
-            logEvent(countryUid, "UPDATE", "Значение поля '" + fieldName + "' очищено",
-                    fieldName, oldValue, null, author);
-        } else {
-            logEvent(countryUid, "UPDATE", "Значение поля '" + fieldName + "' изменено с '" + oldValue + "' на '" + newValue + "'",
-                    fieldName, oldValue, newValue, author);
-        }
+    private void logManufacturerEvent(UUID manufacturerUid, String eventType, String description,
+                                      String fieldName, String oldValue, String newValue, String author) {
+        StationManufacturerEventLog log = StationManufacturerEventLog.builder()
+                .uid(UUID.randomUUID())
+                .stationManufacturerUid(manufacturerUid)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        manufacturerEventLogRepository.save(log);
     }
 
     private CountryEventLogDto toEventDTO(CountryEventLog e) {

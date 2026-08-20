@@ -1,8 +1,11 @@
+// StationDocumentService.java — ПОЛНЫЙ ФАЙЛ (добавлены логирование и переименование)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.StationDocumentDto;
 import com.example.dinamika_back.model.StationDocument;
+import com.example.dinamika_back.model.StationEventLog;
 import com.example.dinamika_back.repository.StationDocumentRepository;
+import com.example.dinamika_back.repository.StationEventLogRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +25,8 @@ import java.util.stream.Collectors;
 public class StationDocumentService {
 
     private final StationDocumentRepository documentRepository;
+    private final StationEventLogRepository eventLogRepository;
+    private final UserService userService;
 
     private static final String UPLOAD_DIR = "uploads/stations/";
 
@@ -89,6 +94,8 @@ public class StationDocumentService {
                     .build();
 
             documentRepository.save(document);
+            
+            logEvent(stationUid, "DOCUMENT_ADD", "Добавлен документ: '" + documentName + "'", null, null, null, userService.getCurrentUsername());
 
             return StationDocumentDto.builder()
                     .uid(document.getUid())
@@ -105,11 +112,37 @@ public class StationDocumentService {
     }
 
     @Transactional
-    public void deleteDocument(UUID documentUid) {
+    public StationDocumentDto renameDocument(String stationUid, String documentUid, String newDocumentName) {
+        StationDocument document = documentRepository.findById(UUID.fromString(documentUid))
+                .orElseThrow(() -> new RuntimeException("Документ не найден: " + documentUid));
+        
+        String oldName = document.getDocumentName();
+        document.setDocumentName(newDocumentName);
+        documentRepository.save(document);
+        
+        logEvent(stationUid, "DOCUMENT_RENAME", "Документ переименован с '" + oldName + "' на '" + newDocumentName + "'", null, null, null, userService.getCurrentUsername());
+        
+        return StationDocumentDto.builder()
+                .uid(document.getUid())
+                .stationUid(document.getStationUid())
+                .documentName(document.getDocumentName())
+                .filePath(document.getFilePath())
+                .originalName(document.getOriginalName())
+                .url(getFileUrl(document.getStationUid(), document.getFilePath()))
+                .createdAt(document.getCreatedAt())
+                .build();
+    }
+
+    @Transactional
+    public void deleteDocument(String stationUid, UUID documentUid) {
         StationDocument document = documentRepository.findById(documentUid)
                 .orElseThrow(() -> new RuntimeException("Документ не найден: " + documentUid));
+        
+        String docName = document.getDocumentName();
         deleteFile(document.getStationUid(), document.getFilePath());
         documentRepository.delete(document);
+        
+        logEvent(stationUid, "DOCUMENT_DELETE", "Удален документ: '" + docName + "'", null, null, null, userService.getCurrentUsername());
     }
 
     @Transactional
@@ -119,5 +152,22 @@ public class StationDocumentService {
             deleteFile(stationUid, doc.getFilePath());
         }
         documentRepository.deleteByStationUid(stationUid);
+    }
+
+    private void logEvent(String stationUid, String eventType, String description,
+                         String fieldName, String oldValue, String newValue, String author) {
+        StationEventLog log = StationEventLog.builder()
+                .uid(UUID.randomUUID())
+                .stationUid(stationUid)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        eventLogRepository.save(log);
     }
 }

@@ -1,4 +1,4 @@
-// StationConfigurationService.java — ПОЛНЫЙ ФАЙЛ (с getAllWithSettings)
+// StationConfigurationService.java — ПОЛНЫЙ ФАЙЛ (исправлена ошибка с lambda)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -22,6 +22,9 @@ public class StationConfigurationService {
     private final StationModelRepository modelRepository;
     private final StationConfigurationEventLogRepository eventLogRepository;
     private final StationConfigurationColumnSettingsService columnSettingsService;
+    private final UserService userService;
+    private final StationRepository stationRepository;
+    private final StationEventLogRepository stationEventLogRepository;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final List<String> ALL_COLUMNS_ORDER = List.of("name", "modelName");
@@ -138,7 +141,22 @@ public class StationConfigurationService {
 
         config = configurationRepository.save(config);
 
-        logEvent(config.getUid(), "CREATE", "Создание конфигурации", null, null, null, "Система");
+        String author = userService.getCurrentUsername();
+        logEvent(config.getUid(), "CREATE", "Создание конфигурации: '" + config.getName() + "'", null, null, null, author);
+        
+        // Логируем создание структуры ячеек в конфигурации
+        if (config.getCellsStructure() != null && !config.getCellsStructure().isEmpty()) {
+            logEvent(config.getUid(), "STRUCTURE_CREATE", "Создана структура ячеек", null, null, null, author);
+            
+            // Логируем в станции, которые используют эту конфигурацию
+            final UUID configUid = config.getUid(); // Создаем final переменную
+            List<Station> relatedStations = stationRepository.findAll().stream()
+                    .filter(s -> s.getConfiguration() != null && s.getConfiguration().getUid().equals(configUid))
+                    .collect(Collectors.toList());
+            for (Station station : relatedStations) {
+                logStationEvent(station.getUid(), "STRUCTURE_CREATE", "Создана структура ячеек конфигурации", null, null, null, author);
+            }
+        }
 
         return toDTO(config);
     }
@@ -148,6 +166,8 @@ public class StationConfigurationService {
         StationConfiguration config = configurationRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Конфигурация не найдена: " + uid));
 
+        String author = userService.getCurrentUsername();
+
         if (request.getName() != null && !request.getName().isBlank()) {
             if (!config.getName().equals(request.getName())
                     && request.getModelId() != null
@@ -155,8 +175,20 @@ public class StationConfigurationService {
                 throw new RuntimeException("Конфигурация с таким именем уже существует для этой модели");
             }
             if (!config.getName().equals(request.getName())) {
-                logFieldChange(uid, "Наименование", config.getName(), request.getName(), "Система");
+                String oldName = config.getName();
+                logEvent(uid, "UPDATE", "'" + oldName + "': Значение поля 'Наименование' изменено с '" + oldName + "' на '" + request.getName() + "'",
+                        "Наименование", oldName, request.getName(), author);
                 config.setName(request.getName());
+
+                // Логируем в историю станций
+                List<Station> relatedStations = stationRepository.findAll().stream()
+                        .filter(s -> s.getConfiguration() != null && s.getConfiguration().getUid().equals(uid))
+                        .collect(Collectors.toList());
+                for (Station station : relatedStations) {
+                    logStationEvent(station.getUid(), "UPDATE",
+                            "'" + station.getName() + "': Значение поля 'Конфигурация' изменено с '" + oldName + "' на '" + request.getName() + "' через справочник 'Конфигурации'",
+                            "Конфигурация", oldName, request.getName(), author);
+                }
             }
         }
 
@@ -165,12 +197,24 @@ public class StationConfigurationService {
             StationModel model = modelRepository.findById(request.getModelId())
                     .orElseThrow(() -> new RuntimeException("Модель станции не найдена: " + request.getModelId()));
             if (oldModelName == null || !oldModelName.equals(model.getName())) {
-                logFieldChange(uid, "Модель", oldModelName, model.getName(), "Система");
+                String currentName = config.getName();
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Модель станции' изменено с '" + oldModelName + "' на '" + model.getName() + "'",
+                        "Модель станции", oldModelName, model.getName(), author);
                 config.setModel(model);
             }
         }
 
-        if (request.getCellsStructure() != null) {
+        if (request.getCellsStructure() != null && !request.getCellsStructure().equals(config.getCellsStructure())) {
+            logEvent(uid, "STRUCTURE_UPDATE", "Обновлена структура ячеек", null, null, null, author);
+            
+            // Логируем в станции, которые используют эту конфигурацию
+            List<Station> relatedStations = stationRepository.findAll().stream()
+                    .filter(s -> s.getConfiguration() != null && s.getConfiguration().getUid().equals(uid))
+                    .collect(Collectors.toList());
+            for (Station station : relatedStations) {
+                logStationEvent(station.getUid(), "STRUCTURE_UPDATE", "Обновлена структура ячеек конфигурации", null, null, null, author);
+            }
+            
             config.setCellsStructure(request.getCellsStructure());
         }
 
@@ -183,7 +227,19 @@ public class StationConfigurationService {
         StationConfiguration config = configurationRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Конфигурация не найдена: " + uid));
 
-        logEvent(uid, "DELETE", "Удаление конфигурации", null, config.getName(), null, "Система");
+        String author = userService.getCurrentUsername();
+
+        // Логируем в историю станций
+        List<Station> relatedStations = stationRepository.findAll().stream()
+                .filter(s -> s.getConfiguration() != null && s.getConfiguration().getUid().equals(uid))
+                .collect(Collectors.toList());
+        for (Station station : relatedStations) {
+            logStationEvent(station.getUid(), "UPDATE",
+                    "'" + station.getName() + "': Значение поля 'Конфигурация' изменено с '" + config.getName() + "' на 'null' через справочник 'Конфигурации'",
+                    "Конфигурация", config.getName(), null, author);
+        }
+
+        logEvent(uid, "DELETE", "Удаление конфигурации: '" + config.getName() + "'", null, config.getName(), null, author);
         configurationRepository.delete(config);
     }
 
@@ -197,6 +253,7 @@ public class StationConfigurationService {
 
     public List<StationConfigurationEventLogDto> getAllEvents() {
         return eventLogRepository.findAllByOrderByCreatedAtDesc().stream()
+                .filter(e -> !"STRUCTURE_CREATE".equals(e.getEventType()) && !"STRUCTURE_UPDATE".equals(e.getEventType()))
                 .map(this::toEventDTO)
                 .collect(Collectors.toList());
     }
@@ -220,20 +277,21 @@ public class StationConfigurationService {
         eventLogRepository.save(log);
     }
 
-    private void logFieldChange(UUID configUid, String fieldName, String oldValue, String newValue, String author) {
-        if (oldValue == null && newValue == null) return;
-        if (oldValue != null && oldValue.equals(newValue)) return;
-
-        if (oldValue == null && newValue != null) {
-            logEvent(configUid, "UPDATE", "Значение поля '" + fieldName + "' установлено: " + newValue,
-                    fieldName, null, newValue, author);
-        } else if (newValue == null && oldValue != null) {
-            logEvent(configUid, "UPDATE", "Значение поля '" + fieldName + "' очищено",
-                    fieldName, oldValue, null, author);
-        } else {
-            logEvent(configUid, "UPDATE", "Значение поля '" + fieldName + "' изменено с '" + oldValue + "' на '" + newValue + "'",
-                    fieldName, oldValue, newValue, author);
-        }
+    private void logStationEvent(String stationUid, String eventType, String description,
+                                 String fieldName, String oldValue, String newValue, String author) {
+        StationEventLog log = StationEventLog.builder()
+                .uid(UUID.randomUUID())
+                .stationUid(stationUid)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        stationEventLogRepository.save(log);
     }
 
     private StationConfigurationEventLogDto toEventDTO(StationConfigurationEventLog e) {

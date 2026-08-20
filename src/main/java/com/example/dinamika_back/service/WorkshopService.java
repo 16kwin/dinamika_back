@@ -1,15 +1,9 @@
-// WorkshopService.java — ПОЛНЫЙ ФАЙЛ (с getAllWithSettings и address)
+// WorkshopService.java — ПОЛНЫЙ ФАЙЛ (добавлено логирование в станции)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
-import com.example.dinamika_back.model.Enterprise;
-import com.example.dinamika_back.model.Location;
-import com.example.dinamika_back.model.Workshop;
-import com.example.dinamika_back.model.WorkshopEventLog;
-import com.example.dinamika_back.repository.EnterpriseRepository;
-import com.example.dinamika_back.repository.LocationRepository;
-import com.example.dinamika_back.repository.WorkshopEventLogRepository;
-import com.example.dinamika_back.repository.WorkshopRepository;
+import com.example.dinamika_back.model.*;
+import com.example.dinamika_back.repository.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +23,11 @@ public class WorkshopService {
     private final LocationRepository locationRepository;
     private final WorkshopEventLogRepository eventLogRepository;
     private final WorkshopColumnSettingsService columnSettingsService;
+    private final UserService userService;
+    private final SectionRepository sectionRepository;
+    private final SectionEventLogRepository sectionEventLogRepository;
+    private final StationRepository stationRepository;
+    private final StationEventLogRepository stationEventLogRepository;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final List<String> ALL_COLUMNS_ORDER = List.of("name", "description", "address", "enterpriseName", "holdingName", "locationName");
@@ -142,7 +141,7 @@ public class WorkshopService {
 
         workshop = workshopRepository.save(workshop);
 
-        logEvent(workshop.getId(), "CREATE", "Создание цеха", null, null, null, "Система");
+        logEvent(workshop.getId(), "CREATE", "Создание цеха: '" + workshop.getName() + "'", null, null, null, userService.getCurrentUsername());
 
         return toDTO(workshop);
     }
@@ -151,6 +150,9 @@ public class WorkshopService {
     public WorkshopFlatDto update(Long id, UpdateWorkshopRequest request) {
         Workshop workshop = workshopRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Цех не найден: " + id));
+
+        String author = userService.getCurrentUsername();
+
         Enterprise enterprise = enterpriseRepository.findById(request.getEnterpriseId())
                 .orElseThrow(() -> new RuntimeException("Предприятие не найдено: " + request.getEnterpriseId()));
 
@@ -162,22 +164,48 @@ public class WorkshopService {
         }
 
         if (!workshop.getName().equals(request.getName())) {
-            logFieldChange(id, "Наименование", workshop.getName(), request.getName(), "Система");
+            String oldName = workshop.getName();
+            logEvent(id, "UPDATE", "'" + oldName + "': Значение поля 'Наименование' изменено с '" + oldName + "' на '" + request.getName() + "'",
+                    "Наименование", oldName, request.getName(), author);
             workshop.setName(request.getName());
+
+            // Логируем в историю секций
+            List<Section> relatedSections = sectionRepository.findByWorkshopId(id);
+            for (Section section : relatedSections) {
+                logSectionEvent(section.getId(), "UPDATE",
+                        "'" + section.getName() + "': Значение поля 'Цех' изменено с '" + oldName + "' на '" + request.getName() + "' через справочник 'Цеха'",
+                        "Цех", oldName, request.getName(), author);
+            }
+
+            // Логируем в историю станций
+            List<Station> relatedStations = stationRepository.findAll().stream()
+                    .filter(s -> s.getWorkshop() != null && s.getWorkshop().getId().equals(id))
+                    .collect(Collectors.toList());
+            for (Station station : relatedStations) {
+                logStationEvent(station.getUid(), "UPDATE",
+                        "'" + station.getName() + "': Значение поля 'Цех' изменено с '" + oldName + "' на '" + request.getName() + "' через справочник 'Цеха'",
+                        "Цех", oldName, request.getName(), author);
+            }
         }
 
         if (request.getDescription() != null && !Objects.equals(request.getDescription(), workshop.getDescription())) {
-            logFieldChange(id, "Описание", workshop.getDescription(), request.getDescription(), "Система");
+            String currentName = workshop.getName();
+            logEvent(id, "UPDATE", "'" + currentName + "': Значение поля 'Описание' изменено с '" + workshop.getDescription() + "' на '" + request.getDescription() + "'",
+                    "Описание", workshop.getDescription(), request.getDescription(), author);
             workshop.setDescription(request.getDescription());
         }
 
         if (request.getAddress() != null && !Objects.equals(request.getAddress(), workshop.getAddress())) {
-            logFieldChange(id, "Адрес", workshop.getAddress(), request.getAddress(), "Система");
+            String currentName = workshop.getName();
+            logEvent(id, "UPDATE", "'" + currentName + "': Значение поля 'Адрес' изменено с '" + workshop.getAddress() + "' на '" + request.getAddress() + "'",
+                    "Адрес", workshop.getAddress(), request.getAddress(), author);
             workshop.setAddress(request.getAddress());
         }
 
         if (!workshop.getEnterprise().getId().equals(request.getEnterpriseId())) {
-            logFieldChange(id, "Предприятие", workshop.getEnterprise().getName(), enterprise.getName(), "Система");
+            String currentName = workshop.getName();
+            logEvent(id, "UPDATE", "'" + currentName + "': Значение поля 'Предприятие' изменено с '" + workshop.getEnterprise().getName() + "' на '" + enterprise.getName() + "'",
+                    "Предприятие", workshop.getEnterprise().getName(), enterprise.getName(), author);
             workshop.setEnterprise(enterprise);
         }
 
@@ -186,12 +214,16 @@ public class WorkshopService {
             Location location = locationRepository.findById(request.getLocationUid())
                     .orElseThrow(() -> new RuntimeException("Расположение не найдено: " + request.getLocationUid()));
             if (oldLocationName == null || !oldLocationName.equals(location.getName())) {
-                logFieldChange(id, "Расположение", oldLocationName, location.getName(), "Система");
+                String currentName = workshop.getName();
+                logEvent(id, "UPDATE", "'" + currentName + "': Значение поля 'Расположение' изменено с '" + oldLocationName + "' на '" + location.getName() + "'",
+                        "Расположение", oldLocationName, location.getName(), author);
                 workshop.setLocation(location);
             }
         } else {
             if (workshop.getLocation() != null) {
-                logFieldChange(id, "Расположение", workshop.getLocation().getName(), null, "Система");
+                String currentName = workshop.getName();
+                logEvent(id, "UPDATE", "'" + currentName + "': Значение поля 'Расположение' изменено с '" + workshop.getLocation().getName() + "' на 'null'",
+                        "Расположение", workshop.getLocation().getName(), null, author);
                 workshop.setLocation(null);
             }
         }
@@ -205,7 +237,27 @@ public class WorkshopService {
         Workshop workshop = workshopRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Цех не найден: " + id));
 
-        logEvent(id, "DELETE", "Удаление цеха", null, workshop.getName(), null, "Система");
+        String author = userService.getCurrentUsername();
+
+        // Логируем в историю секций
+        List<Section> relatedSections = sectionRepository.findByWorkshopId(id);
+        for (Section section : relatedSections) {
+            logSectionEvent(section.getId(), "UPDATE",
+                    "'" + section.getName() + "': Значение поля 'Цех' изменено с '" + workshop.getName() + "' на 'null' через справочник 'Цеха'",
+                    "Цех", workshop.getName(), null, author);
+        }
+
+        // Логируем в историю станций
+        List<Station> relatedStations = stationRepository.findAll().stream()
+                .filter(s -> s.getWorkshop() != null && s.getWorkshop().getId().equals(id))
+                .collect(Collectors.toList());
+        for (Station station : relatedStations) {
+            logStationEvent(station.getUid(), "UPDATE",
+                    "'" + station.getName() + "': Значение поля 'Цех' изменено с '" + workshop.getName() + "' на 'null' через справочник 'Цеха'",
+                    "Цех", workshop.getName(), null, author);
+        }
+
+        logEvent(id, "DELETE", "Удаление цеха: '" + workshop.getName() + "'", null, workshop.getName(), null, author);
         workshopRepository.delete(workshop);
     }
 
@@ -242,20 +294,38 @@ public class WorkshopService {
         eventLogRepository.save(log);
     }
 
-    private void logFieldChange(Long workshopId, String fieldName, String oldValue, String newValue, String author) {
-        if (oldValue == null && newValue == null) return;
-        if (oldValue != null && oldValue.equals(newValue)) return;
+    private void logSectionEvent(Long sectionId, String eventType, String description,
+                                 String fieldName, String oldValue, String newValue, String author) {
+        SectionEventLog log = SectionEventLog.builder()
+                .uid(UUID.randomUUID())
+                .sectionId(sectionId)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        sectionEventLogRepository.save(log);
+    }
 
-        if (oldValue == null && newValue != null) {
-            logEvent(workshopId, "UPDATE", "Значение поля '" + fieldName + "' установлено: " + newValue,
-                    fieldName, null, newValue, author);
-        } else if (newValue == null && oldValue != null) {
-            logEvent(workshopId, "UPDATE", "Значение поля '" + fieldName + "' очищено",
-                    fieldName, oldValue, null, author);
-        } else {
-            logEvent(workshopId, "UPDATE", "Значение поля '" + fieldName + "' изменено с '" + oldValue + "' на '" + newValue + "'",
-                    fieldName, oldValue, newValue, author);
-        }
+    private void logStationEvent(String stationUid, String eventType, String description,
+                                 String fieldName, String oldValue, String newValue, String author) {
+        StationEventLog log = StationEventLog.builder()
+                .uid(UUID.randomUUID())
+                .stationUid(stationUid)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        stationEventLogRepository.save(log);
     }
 
     private WorkshopEventLogDto toEventDTO(WorkshopEventLog e) {

@@ -1,7 +1,8 @@
-// ==================== ПОЛНЫЙ NomenclatureController.java ====================
+// NomenclatureController.java — ПОЛНЫЙ ФАЙЛ (с tree-with-settings)
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
+import com.example.dinamika_back.service.NomenclatureColumnSettingsService;
 import com.example.dinamika_back.service.NomenclatureService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -11,6 +12,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -19,6 +21,87 @@ import java.util.UUID;
 public class NomenclatureController {
 
     private final NomenclatureService nomenclatureService;
+    private final NomenclatureColumnSettingsService columnSettingsService;
+
+    // ==================== ДЕРЕВО С НАСТРОЙКАМИ ====================
+
+    @GetMapping("/tree-with-settings")
+    public ResponseEntity<NomenclatureTreeResponse> getTreeWithSettings(@RequestParam Integer userId) {
+        return ResponseEntity.ok(nomenclatureService.getTreeWithSettings(userId));
+    }
+
+    // ==================== НАСТРОЙКИ КОЛОНОК, ФИЛЬТРОВ, СОРТИРОВКИ, ПУТИ ====================
+
+    @GetMapping("/settings")
+    public ResponseEntity<Map<String, String>> getAllSettings(@RequestParam Integer userId) {
+        Map<String, String> settings = Map.of(
+                "columnsJson", columnSettingsService.getColumnsJson(userId) != null
+                        ? columnSettingsService.getColumnsJson(userId) : "{}",
+                "filtersJson", columnSettingsService.getFiltersJson(userId),
+                "sortJson", columnSettingsService.getSortJson(userId),
+                "currentPathJson", columnSettingsService.getCurrentPathJson(userId)
+        );
+        return ResponseEntity.ok(settings);
+    }
+
+    @GetMapping("/columns-settings")
+    public ResponseEntity<String> getColumnsSettings(@RequestParam Integer userId) {
+        String json = columnSettingsService.getColumnsJson(userId);
+        return ResponseEntity.ok(json != null ? json : "{}");
+    }
+
+    @PatchMapping("/columns-settings")
+    public ResponseEntity<Void> saveColumnsSettings(@RequestParam Integer userId, @RequestBody Map<String, Object> body) {
+        String columnsJson = (String) body.get("columnsJson");
+        columnSettingsService.saveColumnsJson(userId, columnsJson);
+        return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/filters-settings")
+    public ResponseEntity<String> getFiltersSettings(@RequestParam Integer userId) {
+        return ResponseEntity.ok(columnSettingsService.getFiltersJson(userId));
+    }
+
+    @PatchMapping("/filters-settings")
+    public ResponseEntity<Void> saveFiltersSettings(@RequestParam Integer userId, @RequestBody Map<String, Object> body) {
+        String filtersJson = (String) body.get("filtersJson");
+        columnSettingsService.saveFiltersJson(userId, filtersJson);
+        return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/sort-settings")
+    public ResponseEntity<String> getSortSettings(@RequestParam Integer userId) {
+        return ResponseEntity.ok(columnSettingsService.getSortJson(userId));
+    }
+
+    @PatchMapping("/sort-settings")
+    public ResponseEntity<Void> saveSortSettings(@RequestParam Integer userId, @RequestBody Map<String, Object> body) {
+        String sortJson = (String) body.get("sortJson");
+        columnSettingsService.saveSortJson(userId, sortJson);
+        return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/current-path")
+    public ResponseEntity<String> getCurrentPath(@RequestParam Integer userId) {
+        return ResponseEntity.ok(columnSettingsService.getCurrentPathJson(userId));
+    }
+
+    @PatchMapping("/current-path")
+    public ResponseEntity<Void> saveCurrentPath(@RequestParam Integer userId, @RequestBody Map<String, Object> body) {
+        String currentPathJson = (String) body.get("currentPathJson");
+        columnSettingsService.saveCurrentPathJson(userId, currentPathJson);
+        return ResponseEntity.ok().build();
+    }
+
+    @PatchMapping("/settings")
+    public ResponseEntity<Void> saveAllSettings(@RequestParam Integer userId, @RequestBody Map<String, Object> body) {
+        String columnsJson = (String) body.get("columnsJson");
+        String filtersJson = (String) body.get("filtersJson");
+        String sortJson = (String) body.get("sortJson");
+        String currentPathJson = (String) body.get("currentPathJson");
+        columnSettingsService.saveAllJson(userId, columnsJson, filtersJson, sortJson, currentPathJson);
+        return ResponseEntity.ok().build();
+    }
 
     // ==================== Генерация кода ====================
 
@@ -31,7 +114,6 @@ public class NomenclatureController {
 
     @PostMapping("/draft")
     public ResponseEntity<Void> saveDraft(@RequestBody NomenclatureSaveRequest request) {
-        // Автор берется из запроса, если нет — "Система"
         String author = request.getAuthor() != null ? request.getAuthor() : "Система";
         nomenclatureService.saveDraft(request, author);
         return ResponseEntity.ok().build();
@@ -592,7 +674,6 @@ public class NomenclatureController {
     }
 
     // ==================== Получение одного материала ====================
-    // ВАЖНО: этот метод должен быть ПОСЛЕ всех /{materialUid}/...
 
     @GetMapping("/{uid}")
     public ResponseEntity<SprMaterialDTO> getMaterial(@PathVariable UUID uid) {

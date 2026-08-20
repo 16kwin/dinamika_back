@@ -765,11 +765,11 @@ INSERT INTO sections (name, workshop_id) VALUES
     ('Участок З', (SELECT id FROM workshops WHERE name = 'Цех №4' AND enterprise_id = (SELECT id FROM enterprises WHERE name = 'Предприятие №4')))
 ON CONFLICT (name, workshop_id) DO NOTHING;
 
--- Типы станций
+-- Типы станций (русские названия)
 INSERT INTO station_types (uid, name, description) VALUES
-    (gen_random_uuid(), 'DRUM_TYPE', 'Барабанного типа'),
-    (gen_random_uuid(), 'POSTAMAT_TYPE', 'Постамат'),
-    (gen_random_uuid(), 'ADDITIONAL_MODULE', 'Дополнительный модуль')
+    (gen_random_uuid(), 'Барабан', 'Барабанного типа'),
+    (gen_random_uuid(), 'Постамат', 'Постамат'),
+    (gen_random_uuid(), 'Дополнительный модуль', 'Дополнительный модуль')
 ON CONFLICT (name) DO NOTHING;
 
 -- Производители станций
@@ -828,7 +828,6 @@ BEGIN
     SELECT id INTO secG_id FROM sections WHERE name = 'Участок Ж' AND workshop_id = ws5_id;
     SELECT id INTO secH_id FROM sections WHERE name = 'Участок З' AND workshop_id = ws6_id;
 
-    -- Максимальный существующий код + 1
     SELECT COALESCE(MAX(code), 0) INTO v_counter FROM stations;
 
     INSERT INTO stations (uid, name, code, holding_id, enterprise_id, workshop_id, section_id, status, total_cells, filled_cells, template_nomenclature_count, remaining_nomenclature_count, max_ready_parts, ready_parts_count, parent_uid, has_error, is_tmc, is_sgd, is_ok, is_additional_module, has_additional_module)

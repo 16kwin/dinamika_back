@@ -1,13 +1,9 @@
-// StationManufacturerService.java — ПОЛНЫЙ ФАЙЛ (с getAllWithSettings)
+// StationManufacturerService.java — ПОЛНЫЙ ФАЙЛ (добавлено логирование в модели)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
-import com.example.dinamika_back.model.SprCountry;
-import com.example.dinamika_back.model.StationManufacturer;
-import com.example.dinamika_back.model.StationManufacturerEventLog;
-import com.example.dinamika_back.repository.SprCountryRepository;
-import com.example.dinamika_back.repository.StationManufacturerEventLogRepository;
-import com.example.dinamika_back.repository.StationManufacturerRepository;
+import com.example.dinamika_back.model.*;
+import com.example.dinamika_back.repository.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +22,9 @@ public class StationManufacturerService {
     private final SprCountryRepository countryRepository;
     private final StationManufacturerEventLogRepository eventLogRepository;
     private final StationManufacturerColumnSettingsService columnSettingsService;
+    private final UserService userService;
+    private final StationModelRepository modelRepository;
+    private final StationModelEventLogRepository modelEventLogRepository;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final List<String> ALL_COLUMNS_ORDER = List.of("name", "description", "countryName");
@@ -133,7 +132,7 @@ public class StationManufacturerService {
 
         manufacturer = manufacturerRepository.save(manufacturer);
 
-        logEvent(manufacturer.getUid(), "CREATE", "Создание производителя", null, null, null, "Система");
+        logEvent(manufacturer.getUid(), "CREATE", "Создание производителя: '" + manufacturer.getName() + "'", null, null, null, userService.getCurrentUsername());
 
         return toDTO(manufacturer);
     }
@@ -143,6 +142,8 @@ public class StationManufacturerService {
         StationManufacturer manufacturer = manufacturerRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Производитель не найден: " + uid));
 
+        String author = userService.getCurrentUsername();
+
         if (request.getName() != null && !request.getName().isBlank()
                 && !manufacturer.getName().equals(request.getName())
                 && manufacturerRepository.existsByName(request.getName())) {
@@ -150,13 +151,25 @@ public class StationManufacturerService {
         }
         if (request.getName() != null && !request.getName().isBlank()) {
             if (!manufacturer.getName().equals(request.getName())) {
-                logFieldChange(uid, "Наименование", manufacturer.getName(), request.getName(), "Система");
+                String oldName = manufacturer.getName();
+                logEvent(uid, "UPDATE", "'" + oldName + "': Значение поля 'Наименование' изменено с '" + oldName + "' на '" + request.getName() + "'",
+                        "Наименование", oldName, request.getName(), author);
                 manufacturer.setName(request.getName());
+
+                // Логируем в историю моделей
+                List<StationModel> relatedModels = modelRepository.findByManufacturerUid(uid);
+                for (StationModel model : relatedModels) {
+                    logModelEvent(model.getUid(), "UPDATE",
+                            "'" + model.getName() + "': Значение поля 'Производитель' изменено с '" + oldName + "' на '" + request.getName() + "' через справочник 'Производители'",
+                            "Производитель", oldName, request.getName(), author);
+                }
             }
         }
         if (request.getDescription() != null) {
             if (!request.getDescription().equals(manufacturer.getDescription())) {
-                logFieldChange(uid, "Описание", manufacturer.getDescription(), request.getDescription(), "Система");
+                String currentName = manufacturer.getName();
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Описание' изменено с '" + manufacturer.getDescription() + "' на '" + request.getDescription() + "'",
+                        "Описание", manufacturer.getDescription(), request.getDescription(), author);
                 manufacturer.setDescription(request.getDescription());
             }
         }
@@ -166,12 +179,16 @@ public class StationManufacturerService {
             SprCountry country = countryRepository.findById(request.getCountryUid())
                     .orElseThrow(() -> new RuntimeException("Страна не найдена: " + request.getCountryUid()));
             if (oldCountryName == null || !oldCountryName.equals(country.getName())) {
-                logFieldChange(uid, "Страна", oldCountryName, country.getName(), "Система");
+                String currentName = manufacturer.getName();
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Страна' изменено с '" + oldCountryName + "' на '" + country.getName() + "'",
+                        "Страна", oldCountryName, country.getName(), author);
                 manufacturer.setCountry(country);
             }
         } else {
             if (manufacturer.getCountry() != null) {
-                logFieldChange(uid, "Страна", manufacturer.getCountry().getName(), null, "Система");
+                String currentName = manufacturer.getName();
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Страна' изменено с '" + manufacturer.getCountry().getName() + "' на 'null'",
+                        "Страна", manufacturer.getCountry().getName(), null, author);
                 manufacturer.setCountry(null);
             }
         }
@@ -185,7 +202,17 @@ public class StationManufacturerService {
         StationManufacturer manufacturer = manufacturerRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Производитель не найден: " + uid));
 
-        logEvent(uid, "DELETE", "Удаление производителя", null, manufacturer.getName(), null, "Система");
+        String author = userService.getCurrentUsername();
+
+        // Логируем в историю моделей
+        List<StationModel> relatedModels = modelRepository.findByManufacturerUid(uid);
+        for (StationModel model : relatedModels) {
+            logModelEvent(model.getUid(), "UPDATE",
+                    "'" + model.getName() + "': Значение поля 'Производитель' изменено с '" + manufacturer.getName() + "' на 'null' через справочник 'Производители'",
+                    "Производитель", manufacturer.getName(), null, author);
+        }
+
+        logEvent(uid, "DELETE", "Удаление производителя: '" + manufacturer.getName() + "'", null, manufacturer.getName(), null, author);
         manufacturerRepository.delete(manufacturer);
     }
 
@@ -222,20 +249,21 @@ public class StationManufacturerService {
         eventLogRepository.save(log);
     }
 
-    private void logFieldChange(UUID manufacturerUid, String fieldName, String oldValue, String newValue, String author) {
-        if (oldValue == null && newValue == null) return;
-        if (oldValue != null && oldValue.equals(newValue)) return;
-
-        if (oldValue == null && newValue != null) {
-            logEvent(manufacturerUid, "UPDATE", "Значение поля '" + fieldName + "' установлено: " + newValue,
-                    fieldName, null, newValue, author);
-        } else if (newValue == null && oldValue != null) {
-            logEvent(manufacturerUid, "UPDATE", "Значение поля '" + fieldName + "' очищено",
-                    fieldName, oldValue, null, author);
-        } else {
-            logEvent(manufacturerUid, "UPDATE", "Значение поля '" + fieldName + "' изменено с '" + oldValue + "' на '" + newValue + "'",
-                    fieldName, oldValue, newValue, author);
-        }
+    private void logModelEvent(UUID modelUid, String eventType, String description,
+                               String fieldName, String oldValue, String newValue, String author) {
+        StationModelEventLog log = StationModelEventLog.builder()
+                .uid(UUID.randomUUID())
+                .stationModelUid(modelUid)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        modelEventLogRepository.save(log);
     }
 
     private StationManufacturerEventLogDto toEventDTO(StationManufacturerEventLog e) {

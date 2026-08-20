@@ -1,9 +1,13 @@
-// StationTypeService.java — ПОЛНЫЙ ФАЙЛ (с getAllWithSettings)
+// StationTypeService.java — ПОЛНЫЙ ФАЙЛ (добавлено логирование в модели)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
+import com.example.dinamika_back.model.StationModel;
+import com.example.dinamika_back.model.StationModelEventLog;
 import com.example.dinamika_back.model.StationType;
 import com.example.dinamika_back.model.StationTypeEventLog;
+import com.example.dinamika_back.repository.StationModelEventLogRepository;
+import com.example.dinamika_back.repository.StationModelRepository;
 import com.example.dinamika_back.repository.StationTypeEventLogRepository;
 import com.example.dinamika_back.repository.StationTypeRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -23,6 +27,9 @@ public class StationTypeService {
     private final StationTypeRepository stationTypeRepository;
     private final StationTypeEventLogRepository eventLogRepository;
     private final StationTypeColumnSettingsService columnSettingsService;
+    private final UserService userService;
+    private final StationModelRepository modelRepository;
+    private final StationModelEventLogRepository modelEventLogRepository;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final List<String> ALL_COLUMNS_ORDER = List.of("name", "description");
@@ -123,7 +130,7 @@ public class StationTypeService {
         type.setDescription(request.getDescription());
         type = stationTypeRepository.save(type);
 
-        logEvent(type.getUid(), "CREATE", "Создание типа станции", null, null, null, "Система");
+        logEvent(type.getUid(), "CREATE", "Создание типа станции: '" + type.getName() + "'", null, null, null, userService.getCurrentUsername());
 
         return toDTO(type);
     }
@@ -133,6 +140,8 @@ public class StationTypeService {
         StationType type = stationTypeRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Тип станции не найден: " + uid));
 
+        String author = userService.getCurrentUsername();
+
         if (request.getName() != null && !request.getName().isBlank()
                 && !type.getName().equals(request.getName())
                 && stationTypeRepository.existsByName(request.getName())) {
@@ -140,13 +149,25 @@ public class StationTypeService {
         }
         if (request.getName() != null && !request.getName().isBlank()) {
             if (!type.getName().equals(request.getName())) {
-                logFieldChange(uid, "Наименование", type.getName(), request.getName(), "Система");
+                String oldName = type.getName();
+                logEvent(uid, "UPDATE", "'" + oldName + "': Значение поля 'Наименование' изменено с '" + oldName + "' на '" + request.getName() + "'",
+                        "Наименование", oldName, request.getName(), author);
                 type.setName(request.getName());
+
+                // Логируем в историю моделей
+                List<StationModel> relatedModels = modelRepository.findByTypeUid(uid);
+                for (StationModel model : relatedModels) {
+                    logModelEvent(model.getUid(), "UPDATE",
+                            "'" + model.getName() + "': Значение поля 'Тип станции' изменено с '" + oldName + "' на '" + request.getName() + "' через справочник 'Типы станций'",
+                            "Тип станции", oldName, request.getName(), author);
+                }
             }
         }
         if (request.getDescription() != null) {
             if (!request.getDescription().equals(type.getDescription())) {
-                logFieldChange(uid, "Описание", type.getDescription(), request.getDescription(), "Система");
+                String currentName = type.getName();
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Описание' изменено с '" + type.getDescription() + "' на '" + request.getDescription() + "'",
+                        "Описание", type.getDescription(), request.getDescription(), author);
                 type.setDescription(request.getDescription());
             }
         }
@@ -160,7 +181,17 @@ public class StationTypeService {
         StationType type = stationTypeRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Тип станции не найден: " + uid));
 
-        logEvent(uid, "DELETE", "Удаление типа станции", null, type.getName(), null, "Система");
+        String author = userService.getCurrentUsername();
+
+        // Логируем в историю моделей
+        List<StationModel> relatedModels = modelRepository.findByTypeUid(uid);
+        for (StationModel model : relatedModels) {
+            logModelEvent(model.getUid(), "UPDATE",
+                    "'" + model.getName() + "': Значение поля 'Тип станции' изменено с '" + type.getName() + "' на 'null' через справочник 'Типы станций'",
+                    "Тип станции", type.getName(), null, author);
+        }
+
+        logEvent(uid, "DELETE", "Удаление типа станции: '" + type.getName() + "'", null, type.getName(), null, author);
         stationTypeRepository.delete(type);
     }
 
@@ -197,20 +228,21 @@ public class StationTypeService {
         eventLogRepository.save(log);
     }
 
-    private void logFieldChange(UUID stationTypeUid, String fieldName, String oldValue, String newValue, String author) {
-        if (oldValue == null && newValue == null) return;
-        if (oldValue != null && oldValue.equals(newValue)) return;
-
-        if (oldValue == null && newValue != null) {
-            logEvent(stationTypeUid, "UPDATE", "Значение поля '" + fieldName + "' установлено: " + newValue,
-                    fieldName, null, newValue, author);
-        } else if (newValue == null && oldValue != null) {
-            logEvent(stationTypeUid, "UPDATE", "Значение поля '" + fieldName + "' очищено",
-                    fieldName, oldValue, null, author);
-        } else {
-            logEvent(stationTypeUid, "UPDATE", "Значение поля '" + fieldName + "' изменено с '" + oldValue + "' на '" + newValue + "'",
-                    fieldName, oldValue, newValue, author);
-        }
+    private void logModelEvent(UUID modelUid, String eventType, String description,
+                               String fieldName, String oldValue, String newValue, String author) {
+        StationModelEventLog log = StationModelEventLog.builder()
+                .uid(UUID.randomUUID())
+                .stationModelUid(modelUid)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        modelEventLogRepository.save(log);
     }
 
     private StationTypeEventLogDto toEventDTO(StationTypeEventLog e) {

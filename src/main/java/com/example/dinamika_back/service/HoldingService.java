@@ -1,13 +1,9 @@
-// HoldingService.java — ПОЛНЫЙ ФАЙЛ (без uid)
+// HoldingService.java — ПОЛНЫЙ ФАЙЛ (добавлено логирование в станции)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
-import com.example.dinamika_back.model.Holding;
-import com.example.dinamika_back.model.HoldingEventLog;
-import com.example.dinamika_back.model.Location;
-import com.example.dinamika_back.repository.HoldingEventLogRepository;
-import com.example.dinamika_back.repository.HoldingRepository;
-import com.example.dinamika_back.repository.LocationRepository;
+import com.example.dinamika_back.model.*;
+import com.example.dinamika_back.repository.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +22,15 @@ public class HoldingService {
     private final LocationRepository locationRepository;
     private final HoldingEventLogRepository eventLogRepository;
     private final HoldingColumnSettingsService columnSettingsService;
+    private final UserService userService;
+    private final EnterpriseRepository enterpriseRepository;
+    private final EnterpriseEventLogRepository enterpriseEventLogRepository;
+    private final WorkshopRepository workshopRepository;
+    private final WorkshopEventLogRepository workshopEventLogRepository;
+    private final SectionRepository sectionRepository;
+    private final SectionEventLogRepository sectionEventLogRepository;
+    private final StationRepository stationRepository;
+    private final StationEventLogRepository stationEventLogRepository;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final List<String> ALL_COLUMNS_ORDER = List.of("name", "description", "locationName");
@@ -129,7 +134,7 @@ public class HoldingService {
 
         holding = holdingRepository.save(holding);
 
-        logEvent(holding.getId(), "CREATE", "Создание холдинга", null, null, null, "Система");
+        logEvent(holding.getId(), "CREATE", "Создание холдинга: '" + holding.getName() + "'", null, null, null, userService.getCurrentUsername());
 
         return toDTO(holding);
     }
@@ -139,18 +144,65 @@ public class HoldingService {
         Holding holding = holdingRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Холдинг не найден: " + id));
 
+        String author = userService.getCurrentUsername();
+
         if (!holding.getName().equals(request.getName())
                 && holdingRepository.existsByName(request.getName())) {
             throw new RuntimeException("Холдинг с таким именем уже существует: " + request.getName());
         }
 
         if (!holding.getName().equals(request.getName())) {
-            logFieldChange(id, "Наименование", holding.getName(), request.getName(), "Система");
+            String oldName = holding.getName();
+            logEvent(id, "UPDATE", "'" + oldName + "': Значение поля 'Наименование' изменено с '" + oldName + "' на '" + request.getName() + "'",
+                    "Наименование", oldName, request.getName(), author);
             holding.setName(request.getName());
+
+            // Логируем в историю предприятий
+            List<Enterprise> relatedEnterprises = enterpriseRepository.findByHoldingIdOrderByNameAsc(id);
+            for (Enterprise enterprise : relatedEnterprises) {
+                logEnterpriseEvent(enterprise.getId(), "UPDATE",
+                        "'" + enterprise.getName() + "': Значение поля 'Холдинг' изменено с '" + oldName + "' на '" + request.getName() + "' через справочник 'Холдинги'",
+                        "Холдинг", oldName, request.getName(), author);
+            }
+
+            // Логируем в историю цехов
+            List<Workshop> relatedWorkshops = workshopRepository.findAll().stream()
+                    .filter(w -> w.getEnterprise() != null && w.getEnterprise().getHolding() != null
+                            && w.getEnterprise().getHolding().getId().equals(id))
+                    .collect(Collectors.toList());
+            for (Workshop workshop : relatedWorkshops) {
+                logWorkshopEvent(workshop.getId(), "UPDATE",
+                        "'" + workshop.getName() + "': Значение поля 'Холдинг' изменено с '" + oldName + "' на '" + request.getName() + "' через справочник 'Холдинги'",
+                        "Холдинг", oldName, request.getName(), author);
+            }
+
+            // Логируем в историю секций
+            List<Section> relatedSections = sectionRepository.findAll().stream()
+                    .filter(s -> s.getWorkshop() != null && s.getWorkshop().getEnterprise() != null
+                            && s.getWorkshop().getEnterprise().getHolding() != null
+                            && s.getWorkshop().getEnterprise().getHolding().getId().equals(id))
+                    .collect(Collectors.toList());
+            for (Section section : relatedSections) {
+                logSectionEvent(section.getId(), "UPDATE",
+                        "'" + section.getName() + "': Значение поля 'Холдинг' изменено с '" + oldName + "' на '" + request.getName() + "' через справочник 'Холдинги'",
+                        "Холдинг", oldName, request.getName(), author);
+            }
+
+            // Логируем в историю станций
+            List<Station> relatedStations = stationRepository.findAll().stream()
+                    .filter(s -> s.getHolding() != null && s.getHolding().getId().equals(id))
+                    .collect(Collectors.toList());
+            for (Station station : relatedStations) {
+                logStationEvent(station.getUid(), "UPDATE",
+                        "'" + station.getName() + "': Значение поля 'Холдинг' изменено с '" + oldName + "' на '" + request.getName() + "' через справочник 'Холдинги'",
+                        "Холдинг", oldName, request.getName(), author);
+            }
         }
 
         if (request.getDescription() != null && !request.getDescription().equals(holding.getDescription())) {
-            logFieldChange(id, "Описание", holding.getDescription(), request.getDescription(), "Система");
+            String currentName = holding.getName();
+            logEvent(id, "UPDATE", "'" + currentName + "': Значение поля 'Описание' изменено с '" + holding.getDescription() + "' на '" + request.getDescription() + "'",
+                    "Описание", holding.getDescription(), request.getDescription(), author);
             holding.setDescription(request.getDescription());
         }
 
@@ -159,12 +211,16 @@ public class HoldingService {
             Location location = locationRepository.findById(request.getLocationUid())
                     .orElseThrow(() -> new RuntimeException("Расположение не найдено: " + request.getLocationUid()));
             if (oldLocationName == null || !oldLocationName.equals(location.getName())) {
-                logFieldChange(id, "Расположение", oldLocationName, location.getName(), "Система");
+                String currentName = holding.getName();
+                logEvent(id, "UPDATE", "'" + currentName + "': Значение поля 'Расположение' изменено с '" + oldLocationName + "' на '" + location.getName() + "'",
+                        "Расположение", oldLocationName, location.getName(), author);
                 holding.setLocation(location);
             }
         } else {
             if (holding.getLocation() != null) {
-                logFieldChange(id, "Расположение", holding.getLocation().getName(), null, "Система");
+                String currentName = holding.getName();
+                logEvent(id, "UPDATE", "'" + currentName + "': Значение поля 'Расположение' изменено с '" + holding.getLocation().getName() + "' на 'null'",
+                        "Расположение", holding.getLocation().getName(), null, author);
                 holding.setLocation(null);
             }
         }
@@ -178,7 +234,50 @@ public class HoldingService {
         Holding holding = holdingRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Холдинг не найден: " + id));
 
-        logEvent(id, "DELETE", "Удаление холдинга", null, holding.getName(), null, "Система");
+        String author = userService.getCurrentUsername();
+
+        // Логируем в историю предприятий
+        List<Enterprise> relatedEnterprises = enterpriseRepository.findByHoldingIdOrderByNameAsc(id);
+        for (Enterprise enterprise : relatedEnterprises) {
+            logEnterpriseEvent(enterprise.getId(), "UPDATE",
+                    "'" + enterprise.getName() + "': Значение поля 'Холдинг' изменено с '" + holding.getName() + "' на 'null' через справочник 'Холдинги'",
+                    "Холдинг", holding.getName(), null, author);
+        }
+
+        // Логируем в историю цехов
+        List<Workshop> relatedWorkshops = workshopRepository.findAll().stream()
+                .filter(w -> w.getEnterprise() != null && w.getEnterprise().getHolding() != null
+                        && w.getEnterprise().getHolding().getId().equals(id))
+                .collect(Collectors.toList());
+        for (Workshop workshop : relatedWorkshops) {
+            logWorkshopEvent(workshop.getId(), "UPDATE",
+                    "'" + workshop.getName() + "': Значение поля 'Холдинг' изменено с '" + holding.getName() + "' на 'null' через справочник 'Холдинги'",
+                    "Холдинг", holding.getName(), null, author);
+        }
+
+        // Логируем в историю секций
+        List<Section> relatedSections = sectionRepository.findAll().stream()
+                .filter(s -> s.getWorkshop() != null && s.getWorkshop().getEnterprise() != null
+                        && s.getWorkshop().getEnterprise().getHolding() != null
+                        && s.getWorkshop().getEnterprise().getHolding().getId().equals(id))
+                .collect(Collectors.toList());
+        for (Section section : relatedSections) {
+            logSectionEvent(section.getId(), "UPDATE",
+                    "'" + section.getName() + "': Значение поля 'Холдинг' изменено с '" + holding.getName() + "' на 'null' через справочник 'Холдинги'",
+                    "Холдинг", holding.getName(), null, author);
+        }
+
+        // Логируем в историю станций
+        List<Station> relatedStations = stationRepository.findAll().stream()
+                .filter(s -> s.getHolding() != null && s.getHolding().getId().equals(id))
+                .collect(Collectors.toList());
+        for (Station station : relatedStations) {
+            logStationEvent(station.getUid(), "UPDATE",
+                    "'" + station.getName() + "': Значение поля 'Холдинг' изменено с '" + holding.getName() + "' на 'null' через справочник 'Холдинги'",
+                    "Холдинг", holding.getName(), null, author);
+        }
+
+        logEvent(id, "DELETE", "Удаление холдинга: '" + holding.getName() + "'", null, holding.getName(), null, author);
         holdingRepository.delete(holding);
     }
 
@@ -215,20 +314,72 @@ public class HoldingService {
         eventLogRepository.save(log);
     }
 
-    private void logFieldChange(Long holdingId, String fieldName, String oldValue, String newValue, String author) {
-        if (oldValue == null && newValue == null) return;
-        if (oldValue != null && oldValue.equals(newValue)) return;
+    private void logEnterpriseEvent(Long enterpriseId, String eventType, String description,
+                                    String fieldName, String oldValue, String newValue, String author) {
+        EnterpriseEventLog log = EnterpriseEventLog.builder()
+                .uid(UUID.randomUUID())
+                .enterpriseId(enterpriseId)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        enterpriseEventLogRepository.save(log);
+    }
 
-        if (oldValue == null && newValue != null) {
-            logEvent(holdingId, "UPDATE", "Значение поля '" + fieldName + "' установлено: " + newValue,
-                    fieldName, null, newValue, author);
-        } else if (newValue == null && oldValue != null) {
-            logEvent(holdingId, "UPDATE", "Значение поля '" + fieldName + "' очищено",
-                    fieldName, oldValue, null, author);
-        } else {
-            logEvent(holdingId, "UPDATE", "Значение поля '" + fieldName + "' изменено с '" + oldValue + "' на '" + newValue + "'",
-                    fieldName, oldValue, newValue, author);
-        }
+    private void logWorkshopEvent(Long workshopId, String eventType, String description,
+                                  String fieldName, String oldValue, String newValue, String author) {
+        WorkshopEventLog log = WorkshopEventLog.builder()
+                .uid(UUID.randomUUID())
+                .workshopId(workshopId)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        workshopEventLogRepository.save(log);
+    }
+
+    private void logSectionEvent(Long sectionId, String eventType, String description,
+                                 String fieldName, String oldValue, String newValue, String author) {
+        SectionEventLog log = SectionEventLog.builder()
+                .uid(UUID.randomUUID())
+                .sectionId(sectionId)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        sectionEventLogRepository.save(log);
+    }
+
+    private void logStationEvent(String stationUid, String eventType, String description,
+                                 String fieldName, String oldValue, String newValue, String author) {
+        StationEventLog log = StationEventLog.builder()
+                .uid(UUID.randomUUID())
+                .stationUid(stationUid)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        stationEventLogRepository.save(log);
     }
 
     private HoldingEventLogDto toEventDTO(HoldingEventLog e) {

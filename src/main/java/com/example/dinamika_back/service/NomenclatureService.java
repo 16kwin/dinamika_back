@@ -1,9 +1,11 @@
-// NomenclatureService.java — ПОЛНЫЙ ФАЙЛ (исправлен MaterialSupplyDTO)
+// NomenclatureService.java — ПОЛНЫЙ ФАЙЛ (исправлены ALL_COLUMNS_ORDER и REQUIRED_COLUMNS)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
 import com.example.dinamika_back.model.*;
 import com.example.dinamika_back.repository.*;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,8 +47,90 @@ public class NomenclatureService {
     private final RegRatingRepository regRatingRepository;
     private final RegIntegrationRepository regIntegrationRepository;
     private final RegEventLogRepository eventLogRepository;
+    private final NomenclatureColumnSettingsService columnSettingsService;
 
     private static final String NOMENCLATURE_UPLOAD_DIR = "uploads/nomenclature/";
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+    
+    private static final List<String> ALL_COLUMNS_ORDER = List.of(
+            "name", "code", "article", "typeMainName", "typePurposeName", "typeProductName",
+            "barcode", "sku", "rating",
+            "description", "usage", "wasteMaterial", "recycleMaterial",
+            "manufacturerName", "countryName", "brandName", "modelName", "lastPrice"
+    );
+    
+    private static final Set<String> REQUIRED_COLUMNS = new LinkedHashSet<>(List.of(
+            "name", "code", "article", "typeMainName", "typePurposeName", "typeProductName",
+            "barcode", "sku", "rating"
+    ));
+
+    // ==================== ПОЛУЧЕНИЕ ДЕРЕВА С НАСТРОЙКАМИ ====================
+
+    public NomenclatureTreeResponse getTreeWithSettings(Integer userId) {
+        String columnsJson = columnSettingsService.getColumnsJson(userId);
+        Set<String> visibleColumns = new LinkedHashSet<>(ALL_COLUMNS_ORDER);
+        Map<String, Double> columnWidths = new HashMap<>();
+        Set<String> requiredColumns = new LinkedHashSet<>(REQUIRED_COLUMNS);
+
+        if (columnsJson != null && !columnsJson.isEmpty()) {
+            parseColumnSettings(columnsJson, visibleColumns, columnWidths, requiredColumns);
+        }
+
+        List<String> orderedColumns = ALL_COLUMNS_ORDER.stream()
+                .filter(visibleColumns::contains)
+                .collect(Collectors.toList());
+
+        List<GroupMaterialTreeDTO> tree = getFullTree();
+
+        return NomenclatureTreeResponse.builder()
+                .tree(tree)
+                .columns(orderedColumns)
+                .columnWidths(columnWidths)
+                .requiredColumns(new ArrayList<>(requiredColumns))
+                .columnsJson(columnsJson != null ? columnsJson : "{}")
+                .filtersJson(columnSettingsService.getFiltersJson(userId))
+                .sortJson(columnSettingsService.getSortJson(userId))
+                .currentPathJson(columnSettingsService.getCurrentPathJson(userId))
+                .build();
+    }
+
+    private void parseColumnSettings(String json, Set<String> visibleColumns, Map<String, Double> columnWidths, Set<String> requiredColumns) {
+        try {
+            Map<String, Object> map = objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
+            visibleColumns.clear();
+            
+            for (Map.Entry<String, Object> entry : map.entrySet()) {
+                String key = entry.getKey();
+                Object value = entry.getValue();
+                
+                if (value instanceof Boolean) {
+                    if ((Boolean) value) {
+                        visibleColumns.add(key);
+                    }
+                } else if (value instanceof Map) {
+                    Map<String, Object> settings = (Map<String, Object>) value;
+                    Object visible = settings.get("visible");
+                    Object width = settings.get("width");
+                    Object required = settings.get("required");
+                    
+                    if (visible instanceof Boolean && (Boolean) visible) {
+                        visibleColumns.add(key);
+                    }
+                    
+                    if (width instanceof Number) {
+                        columnWidths.put(key, ((Number) width).doubleValue());
+                    }
+                    
+                    if (required instanceof Boolean && (Boolean) required) {
+                        requiredColumns.add(key);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            visibleColumns.clear();
+            visibleColumns.addAll(ALL_COLUMNS_ORDER);
+        }
+    }
 
     // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ ФАЙЛОВ ====================
 

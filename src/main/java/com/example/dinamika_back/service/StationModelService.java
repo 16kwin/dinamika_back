@@ -1,4 +1,4 @@
-// StationModelService.java — ПОЛНЫЙ ФАЙЛ (с getAllWithSettings)
+// StationModelService.java — ПОЛНЫЙ ФАЙЛ (логирование изображений и структуры в станции)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -31,6 +31,10 @@ public class StationModelService {
     private final StationModelDocumentRepository documentRepository;
     private final StationModelEventLogRepository eventLogRepository;
     private final StationModelColumnSettingsService columnSettingsService;
+    private final UserService userService;
+    private final StationConfigurationEventLogRepository configurationEventLogRepository;
+    private final StationRepository stationRepository;
+    private final StationEventLogRepository stationEventLogRepository;
 
     private static final String UPLOAD_DIR = "uploads/station-models/";
     private static final ObjectMapper objectMapper = new ObjectMapper();
@@ -216,7 +220,12 @@ public class StationModelService {
         model = modelRepository.save(model);
         createDefaultConfiguration(model);
 
-        logEvent(model.getUid(), "CREATE", "Создание модели станции", null, null, null, "Система");
+        String author = userService.getCurrentUsername();
+        logEvent(model.getUid(), "CREATE", "Создание модели станции: '" + model.getName() + "'", null, null, null, author);
+        
+        if (model.getCellsStructure() != null && !model.getCellsStructure().isEmpty()) {
+            logEvent(model.getUid(), "STRUCTURE_CREATE", "Создана структура ячеек", null, null, null, author);
+        }
 
         return toDTO(model);
     }
@@ -226,27 +235,77 @@ public class StationModelService {
         StationModel model = modelRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Модель станции не найдена: " + uid));
 
+        String author = userService.getCurrentUsername();
+
         if (request.getName() != null && !request.getName().isBlank()) {
             if (!model.getName().equals(request.getName())) {
-                logFieldChange(uid, "Наименование", model.getName(), request.getName(), "Система");
+                String oldName = model.getName();
+                logEvent(uid, "UPDATE", "'" + oldName + "': Значение поля 'Наименование' изменено с '" + oldName + "' на '" + request.getName() + "'",
+                        "Наименование", oldName, request.getName(), author);
                 model.setName(request.getName());
+
+                List<StationConfiguration> relatedConfigs = configurationRepository.findByModelUidOrderByNameAsc(uid);
+                for (StationConfiguration config : relatedConfigs) {
+                    logConfigurationEvent(config.getUid(), "UPDATE",
+                            "'" + config.getName() + "': Значение поля 'Модель станции' изменено с '" + oldName + "' на '" + request.getName() + "' через справочник 'Модели станций'",
+                            "Модель станции", oldName, request.getName(), author);
+                }
+
+                List<Station> relatedStations = stationRepository.findAll().stream()
+                        .filter(s -> s.getModel() != null && s.getModel().getUid().equals(uid))
+                        .collect(Collectors.toList());
+                for (Station station : relatedStations) {
+                    logStationEvent(station.getUid(), "UPDATE",
+                            "'" + station.getName() + "': Значение поля 'Модель' изменено с '" + oldName + "' на '" + request.getName() + "' через справочник 'Модели станций'",
+                            "Модель", oldName, request.getName(), author);
+                }
             }
         }
         if (request.getArticle() != null) {
             if (!request.getArticle().equals(model.getArticle())) {
-                logFieldChange(uid, "Артикул", model.getArticle(), request.getArticle(), "Система");
+                String currentName = model.getName();
+                String oldVal = model.getArticle() != null ? model.getArticle() : "null";
+                String newVal = request.getArticle() != null ? request.getArticle() : "null";
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Артикул' изменено с '" + oldVal + "' на '" + newVal + "'",
+                        "Артикул", oldVal, newVal, author);
                 model.setArticle(request.getArticle());
+
+                List<Station> relatedStations = stationRepository.findAll().stream()
+                        .filter(s -> s.getModel() != null && s.getModel().getUid().equals(uid))
+                        .collect(Collectors.toList());
+                for (Station station : relatedStations) {
+                    logStationEvent(station.getUid(), "UPDATE",
+                            "'" + station.getName() + "': Значение поля 'Артикул' изменено с '" + oldVal + "' на '" + newVal + "' через справочник 'Модели станций'",
+                            "Артикул", oldVal, newVal, author);
+                }
             }
         }
         if (request.getRevision() != null) {
             if (!request.getRevision().equals(model.getRevision())) {
-                logFieldChange(uid, "Ревизия", model.getRevision(), request.getRevision(), "Система");
+                String currentName = model.getName();
+                String oldVal = model.getRevision() != null ? model.getRevision() : "null";
+                String newVal = request.getRevision() != null ? request.getRevision() : "null";
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Ревизия' изменено с '" + oldVal + "' на '" + newVal + "'",
+                        "Ревизия", oldVal, newVal, author);
                 model.setRevision(request.getRevision());
+
+                List<Station> relatedStations = stationRepository.findAll().stream()
+                        .filter(s -> s.getModel() != null && s.getModel().getUid().equals(uid))
+                        .collect(Collectors.toList());
+                for (Station station : relatedStations) {
+                    logStationEvent(station.getUid(), "UPDATE",
+                            "'" + station.getName() + "': Значение поля 'Ревизия' изменено с '" + oldVal + "' на '" + newVal + "' через справочник 'Модели станций'",
+                            "Ревизия", oldVal, newVal, author);
+                }
             }
         }
         if (request.getPurpose() != null) {
             if (!request.getPurpose().equals(model.getPurpose())) {
-                logFieldChange(uid, "Назначение", model.getPurpose(), request.getPurpose(), "Система");
+                String currentName = model.getName();
+                String oldVal = model.getPurpose() != null ? model.getPurpose() : "null";
+                String newVal = request.getPurpose() != null ? request.getPurpose() : "null";
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Описание' изменено с '" + oldVal + "' на '" + newVal + "'",
+                        "Описание", oldVal, newVal, author);
                 model.setPurpose(request.getPurpose());
             }
         }
@@ -255,8 +314,19 @@ public class StationModelService {
             StationType type = typeRepository.findById(request.getTypeId())
                     .orElseThrow(() -> new RuntimeException("Тип станции не найден: " + request.getTypeId()));
             if (oldTypeName == null || !oldTypeName.equals(type.getName())) {
-                logFieldChange(uid, "Тип", oldTypeName, type.getName(), "Система");
+                String currentName = model.getName();
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Тип станции' изменено с '" + oldTypeName + "' на '" + type.getName() + "'",
+                        "Тип станции", oldTypeName, type.getName(), author);
                 model.setType(type);
+
+                List<Station> relatedStations = stationRepository.findAll().stream()
+                        .filter(s -> s.getModel() != null && s.getModel().getUid().equals(uid))
+                        .collect(Collectors.toList());
+                for (Station station : relatedStations) {
+                    logStationEvent(station.getUid(), "UPDATE",
+                            "'" + station.getName() + "': Значение поля 'Тип станции' изменено с '" + oldTypeName + "' на '" + type.getName() + "' через справочник 'Модели станций'",
+                            "Тип станции", oldTypeName, type.getName(), author);
+                }
             }
         }
         if (request.getManufacturerId() != null) {
@@ -264,19 +334,43 @@ public class StationModelService {
             StationManufacturer manufacturer = manufacturerRepository.findById(request.getManufacturerId())
                     .orElseThrow(() -> new RuntimeException("Производитель не найден: " + request.getManufacturerId()));
             if (oldManufacturerName == null || !oldManufacturerName.equals(manufacturer.getName())) {
-                logFieldChange(uid, "Производитель", oldManufacturerName, manufacturer.getName(), "Система");
+                String currentName = model.getName();
+                logEvent(uid, "UPDATE", "'" + currentName + "': Значение поля 'Производитель' изменено с '" + oldManufacturerName + "' на '" + manufacturer.getName() + "'",
+                        "Производитель", oldManufacturerName, manufacturer.getName(), author);
                 model.setManufacturer(manufacturer);
+
+                List<Station> relatedStations = stationRepository.findAll().stream()
+                        .filter(s -> s.getModel() != null && s.getModel().getUid().equals(uid))
+                        .collect(Collectors.toList());
+                for (Station station : relatedStations) {
+                    logStationEvent(station.getUid(), "UPDATE",
+                            "'" + station.getName() + "': Значение поля 'Производитель' изменено с '" + oldManufacturerName + "' на '" + manufacturer.getName() + "' через справочник 'Модели станций'",
+                            "Производитель", oldManufacturerName, manufacturer.getName(), author);
+                }
             }
         }
 
+        String newCellsStructure = null;
         if (request.getCellsStructure() != null && !request.getCellsStructure().isEmpty()) {
-            model.setCellsStructure(request.getCellsStructure());
+            newCellsStructure = request.getCellsStructure();
         } else if (request.getColumns() != null || request.getDrums() != null) {
             CreateStationModelRequest createReq = new CreateStationModelRequest();
             createReq.setColumns(request.getColumns()); createReq.setCellsPerColumn(request.getCellsPerColumn());
             createReq.setDrums(request.getDrums()); createReq.setColumnsPerDrum(request.getColumnsPerDrum()); createReq.setRowsPerColumn(request.getRowsPerColumn());
-            String newStructure = generateCellsStructure(createReq);
-            if (newStructure != null) model.setCellsStructure(newStructure);
+            newCellsStructure = generateCellsStructure(createReq);
+        }
+
+        if (newCellsStructure != null && !newCellsStructure.equals(model.getCellsStructure())) {
+            logEvent(uid, "STRUCTURE_UPDATE", "Обновлена структура ячеек", null, null, null, author);
+            
+            List<Station> relatedStations = stationRepository.findAll().stream()
+                    .filter(s -> s.getModel() != null && s.getModel().getUid().equals(uid))
+                    .collect(Collectors.toList());
+            for (Station station : relatedStations) {
+                logStationEvent(station.getUid(), "STRUCTURE_UPDATE", "Обновлена структура ячеек модели", null, null, null, author);
+            }
+            
+            model.setCellsStructure(newCellsStructure);
         }
 
         model = modelRepository.save(model);
@@ -286,10 +380,29 @@ public class StationModelService {
     @Transactional
     public void delete(UUID uid) {
         StationModel model = modelRepository.findById(uid).orElseThrow(() -> new RuntimeException("Модель станции не найдена: " + uid));
+
+        String author = userService.getCurrentUsername();
+
+        List<StationConfiguration> relatedConfigs = configurationRepository.findByModelUidOrderByNameAsc(uid);
+        for (StationConfiguration config : relatedConfigs) {
+            logConfigurationEvent(config.getUid(), "UPDATE",
+                    "'" + config.getName() + "': Значение поля 'Модель станции' изменено с '" + model.getName() + "' на 'null' через справочник 'Модели станций'",
+                    "Модель станции", model.getName(), null, author);
+        }
+
+        List<Station> relatedStations = stationRepository.findAll().stream()
+                .filter(s -> s.getModel() != null && s.getModel().getUid().equals(uid))
+                .collect(Collectors.toList());
+        for (Station station : relatedStations) {
+            logStationEvent(station.getUid(), "UPDATE",
+                    "'" + station.getName() + "': Значение поля 'Модель' изменено с '" + model.getName() + "' на 'null' через справочник 'Модели станций'",
+                    "Модель", model.getName(), null, author);
+        }
+
         deleteAllImages(uid);
         documentRepository.deleteByModelUid(uid);
 
-        logEvent(uid, "DELETE", "Удаление модели станции", null, model.getName(), null, "Система");
+        logEvent(uid, "DELETE", "Удаление модели станции: '" + model.getName() + "'", null, model.getName(), null, author);
 
         modelRepository.delete(model);
     }
@@ -313,6 +426,10 @@ public class StationModelService {
 
     public List<StationModelEventLogDto> getAllEvents() {
         return eventLogRepository.findAllByOrderByCreatedAtDesc().stream()
+                .filter(e -> !"STRUCTURE_CREATE".equals(e.getEventType()) && !"STRUCTURE_UPDATE".equals(e.getEventType())
+                        && !"IMAGE_ADD".equals(e.getEventType()) && !"IMAGE_DELETE".equals(e.getEventType())
+                        && !"DOCUMENT_ADD".equals(e.getEventType()) && !"DOCUMENT_RENAME".equals(e.getEventType())
+                        && !"DOCUMENT_DELETE".equals(e.getEventType()))
                 .map(this::toEventDTO)
                 .collect(Collectors.toList());
     }
@@ -336,20 +453,38 @@ public class StationModelService {
         eventLogRepository.save(log);
     }
 
-    private void logFieldChange(UUID modelUid, String fieldName, String oldValue, String newValue, String author) {
-        if (oldValue == null && newValue == null) return;
-        if (oldValue != null && oldValue.equals(newValue)) return;
+    private void logConfigurationEvent(UUID configUid, String eventType, String description,
+                                       String fieldName, String oldValue, String newValue, String author) {
+        StationConfigurationEventLog log = StationConfigurationEventLog.builder()
+                .uid(UUID.randomUUID())
+                .stationConfigurationUid(configUid)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        configurationEventLogRepository.save(log);
+    }
 
-        if (oldValue == null && newValue != null) {
-            logEvent(modelUid, "UPDATE", "Значение поля '" + fieldName + "' установлено: " + newValue,
-                    fieldName, null, newValue, author);
-        } else if (newValue == null && oldValue != null) {
-            logEvent(modelUid, "UPDATE", "Значение поля '" + fieldName + "' очищено",
-                    fieldName, oldValue, null, author);
-        } else {
-            logEvent(modelUid, "UPDATE", "Значение поля '" + fieldName + "' изменено с '" + oldValue + "' на '" + newValue + "'",
-                    fieldName, oldValue, newValue, author);
-        }
+    private void logStationEvent(String stationUid, String eventType, String description,
+                                 String fieldName, String oldValue, String newValue, String author) {
+        StationEventLog log = StationEventLog.builder()
+                .uid(UUID.randomUUID())
+                .stationUid(stationUid)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        stationEventLogRepository.save(log);
     }
 
     private StationModelEventLogDto toEventDTO(StationModelEventLog e) {
@@ -382,6 +517,18 @@ public class StationModelService {
         StationModelImage image = new StationModelImage();
         image.setUid(UUID.randomUUID()); image.setModel(model); image.setFilePath(fileName); image.setOriginalName(file.getOriginalFilename()); image.setSortOrder(0);
         image = imageRepository.save(image);
+        
+        String author = userService.getCurrentUsername();
+        logEvent(modelUid, "IMAGE_ADD", "Добавлено изображение: '" + file.getOriginalFilename() + "'", null, null, null, author);
+        
+        // Логируем в станции
+        List<Station> relatedStations = stationRepository.findAll().stream()
+                .filter(s -> s.getModel() != null && s.getModel().getUid().equals(modelUid))
+                .collect(Collectors.toList());
+        for (Station station : relatedStations) {
+            logStationEvent(station.getUid(), "IMAGE_ADD", "Добавлено изображение модели: '" + file.getOriginalFilename() + "'", null, null, null, author);
+        }
+        
         return new StationModelImageDto(image.getUid(), modelUid, fileName, file.getOriginalFilename(), getFileUrl(modelUid, fileName), 0);
     }
 
@@ -391,6 +538,17 @@ public class StationModelService {
         UUID modelUid = image.getModel().getUid();
         deleteFile(modelUid, image.getFilePath());
         imageRepository.delete(image);
+        
+        String author = userService.getCurrentUsername();
+        logEvent(modelUid, "IMAGE_DELETE", "Удалено изображение: '" + image.getOriginalName() + "'", null, null, null, author);
+        
+        // Логируем в станции
+        List<Station> relatedStations = stationRepository.findAll().stream()
+                .filter(s -> s.getModel() != null && s.getModel().getUid().equals(modelUid))
+                .collect(Collectors.toList());
+        for (Station station : relatedStations) {
+            logStationEvent(station.getUid(), "IMAGE_DELETE", "Удалено изображение модели: '" + image.getOriginalName() + "'", null, null, null, author);
+        }
     }
 
     private void deleteAllImages(UUID modelUid) {
@@ -420,6 +578,9 @@ public class StationModelService {
                 .uid(UUID.randomUUID()).modelUid(modelUid).documentName(documentName)
                 .filePath(fileName).originalName(file.getOriginalFilename()).createdAt(LocalDateTime.now()).build();
         documentRepository.save(document);
+        
+        logEvent(modelUid, "DOCUMENT_ADD", "Добавлен документ: '" + documentName + "'", null, null, null, userService.getCurrentUsername());
+        
         return StationModelDocumentDto.builder()
                 .uid(document.getUid()).modelUid(modelUid).documentName(document.getDocumentName())
                 .filePath(document.getFilePath()).originalName(document.getOriginalName())
@@ -427,10 +588,30 @@ public class StationModelService {
     }
 
     @Transactional
+    public StationModelDocumentDto renameDocument(UUID documentUid, String newDocumentName) {
+        StationModelDocument document = documentRepository.findById(documentUid)
+                .orElseThrow(() -> new RuntimeException("Документ не найден: " + documentUid));
+        String oldName = document.getDocumentName();
+        document.setDocumentName(newDocumentName);
+        documentRepository.save(document);
+        
+        logEvent(document.getModelUid(), "DOCUMENT_RENAME", "Документ переименован с '" + oldName + "' на '" + newDocumentName + "'", null, null, null, userService.getCurrentUsername());
+        
+        return StationModelDocumentDto.builder()
+                .uid(document.getUid()).modelUid(document.getModelUid()).documentName(document.getDocumentName())
+                .filePath(document.getFilePath()).originalName(document.getOriginalName())
+                .url(getDocumentFileUrl(document.getModelUid(), document.getFilePath())).createdAt(document.getCreatedAt()).build();
+    }
+
+    @Transactional
     public void deleteDocument(UUID documentUid) {
         StationModelDocument document = documentRepository.findById(documentUid).orElseThrow(() -> new RuntimeException("Документ не найден: " + documentUid));
-        deleteDocumentFile(document.getModelUid(), document.getFilePath());
+        UUID modelUid = document.getModelUid();
+        String docName = document.getDocumentName();
+        deleteDocumentFile(modelUid, document.getFilePath());
         documentRepository.delete(document);
+        
+        logEvent(modelUid, "DOCUMENT_DELETE", "Удален документ: '" + docName + "'", null, null, null, userService.getCurrentUsername());
     }
 
     private String saveDocumentFile(UUID modelUid, MultipartFile file) throws IOException {

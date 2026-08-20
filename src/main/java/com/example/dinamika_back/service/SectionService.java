@@ -1,13 +1,9 @@
-// SectionService.java — ПОЛНЫЙ ФАЙЛ (исправлен: добавлен columnSettingsService и getAllWithSettings)
+// SectionService.java — ПОЛНЫЙ ФАЙЛ (добавлено логирование в станции)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
-import com.example.dinamika_back.model.Section;
-import com.example.dinamika_back.model.SectionEventLog;
-import com.example.dinamika_back.model.Workshop;
-import com.example.dinamika_back.repository.SectionEventLogRepository;
-import com.example.dinamika_back.repository.SectionRepository;
-import com.example.dinamika_back.repository.WorkshopRepository;
+import com.example.dinamika_back.model.*;
+import com.example.dinamika_back.repository.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +22,9 @@ public class SectionService {
     private final WorkshopRepository workshopRepository;
     private final SectionEventLogRepository eventLogRepository;
     private final SectionColumnSettingsService columnSettingsService;
+    private final UserService userService;
+    private final StationRepository stationRepository;
+    private final StationEventLogRepository stationEventLogRepository;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final List<String> ALL_COLUMNS_ORDER = List.of("name", "workshopName", "enterpriseName", "holdingName");
@@ -130,7 +129,7 @@ public class SectionService {
         section.setWorkshop(workshop);
         section = sectionRepository.save(section);
 
-        logEvent(section.getId(), "CREATE", "Создание участка", null, null, null, "Система");
+        logEvent(section.getId(), "CREATE", "Создание участка: '" + section.getName() + "'", null, null, null, userService.getCurrentUsername());
 
         return toDTO(section);
     }
@@ -139,6 +138,9 @@ public class SectionService {
     public SectionFlatDto update(Long id, UpdateSectionRequest request) {
         Section section = sectionRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Участок не найден: " + id));
+
+        String author = userService.getCurrentUsername();
+
         Workshop workshop = workshopRepository.findById(request.getWorkshopId())
                 .orElseThrow(() -> new RuntimeException("Цех не найден: " + request.getWorkshopId()));
 
@@ -150,12 +152,56 @@ public class SectionService {
         }
 
         if (!section.getName().equals(request.getName())) {
-            logFieldChange(id, "Наименование", section.getName(), request.getName(), "Система");
+            String oldName = section.getName();
+            logEvent(id, "UPDATE", "'" + oldName + "': Значение поля 'Наименование' изменено с '" + oldName + "' на '" + request.getName() + "'",
+                    "Наименование", oldName, request.getName(), author);
             section.setName(request.getName());
+
+            // Логируем в историю станций
+            List<Station> relatedStations = stationRepository.findAll().stream()
+                    .filter(s -> s.getSection() != null && s.getSection().getId().equals(id))
+                    .collect(Collectors.toList());
+            for (Station station : relatedStations) {
+                logStationEvent(station.getUid(), "UPDATE",
+                        "'" + station.getName() + "': Значение поля 'Участок' изменено с '" + oldName + "' на '" + request.getName() + "' через справочник 'Участки'",
+                        "Участок", oldName, request.getName(), author);
+            }
         }
 
         if (!section.getWorkshop().getId().equals(request.getWorkshopId())) {
-            logFieldChange(id, "Цех", section.getWorkshop().getName(), workshop.getName(), "Система");
+            String currentName = section.getName();
+            String oldWorkshopName = section.getWorkshop().getName();
+            
+            String oldEnterpriseName = section.getWorkshop().getEnterprise() != null 
+                    ? section.getWorkshop().getEnterprise().getName() : null;
+            String newEnterpriseName = workshop.getEnterprise() != null 
+                    ? workshop.getEnterprise().getName() : null;
+            
+            String oldHoldingName = section.getWorkshop().getEnterprise() != null 
+                    && section.getWorkshop().getEnterprise().getHolding() != null
+                    ? section.getWorkshop().getEnterprise().getHolding().getName() : null;
+            String newHoldingName = workshop.getEnterprise() != null 
+                    && workshop.getEnterprise().getHolding() != null
+                    ? workshop.getEnterprise().getHolding().getName() : null;
+            
+            // Логируем изменение цеха
+            logEvent(id, "UPDATE", "'" + currentName + "': Значение поля 'Цех' изменено с '" + oldWorkshopName + "' на '" + workshop.getName() + "'",
+                    "Цех", oldWorkshopName, workshop.getName(), author);
+            
+            // Логируем изменение предприятия (если оно реально поменялось)
+            if (oldEnterpriseName != null && newEnterpriseName != null 
+                    && !oldEnterpriseName.equals(newEnterpriseName)) {
+                logEvent(id, "UPDATE", "'" + currentName + "': Значение поля 'Предприятие' изменено с '" + oldEnterpriseName + "' на '" + newEnterpriseName + "'",
+                        "Предприятие", oldEnterpriseName, newEnterpriseName, author);
+            }
+            
+            // Логируем изменение холдинга (если он реально поменялся)
+            if (oldHoldingName != null && newHoldingName != null 
+                    && !oldHoldingName.equals(newHoldingName)) {
+                logEvent(id, "UPDATE", "'" + currentName + "': Значение поля 'Холдинг' изменено с '" + oldHoldingName + "' на '" + newHoldingName + "'",
+                        "Холдинг", oldHoldingName, newHoldingName, author);
+            }
+            
             section.setWorkshop(workshop);
         }
 
@@ -168,7 +214,19 @@ public class SectionService {
         Section section = sectionRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Участок не найден: " + id));
 
-        logEvent(id, "DELETE", "Удаление участка", null, section.getName(), null, "Система");
+        String author = userService.getCurrentUsername();
+
+        // Логируем в историю станций
+        List<Station> relatedStations = stationRepository.findAll().stream()
+                .filter(s -> s.getSection() != null && s.getSection().getId().equals(id))
+                .collect(Collectors.toList());
+        for (Station station : relatedStations) {
+            logStationEvent(station.getUid(), "UPDATE",
+                    "'" + station.getName() + "': Значение поля 'Участок' изменено с '" + section.getName() + "' на 'null' через справочник 'Участки'",
+                    "Участок", section.getName(), null, author);
+        }
+
+        logEvent(id, "DELETE", "Удаление участка: '" + section.getName() + "'", null, section.getName(), null, author);
         sectionRepository.delete(section);
     }
 
@@ -205,20 +263,21 @@ public class SectionService {
         eventLogRepository.save(log);
     }
 
-    private void logFieldChange(Long sectionId, String fieldName, String oldValue, String newValue, String author) {
-        if (oldValue == null && newValue == null) return;
-        if (oldValue != null && oldValue.equals(newValue)) return;
-
-        if (oldValue == null && newValue != null) {
-            logEvent(sectionId, "UPDATE", "Значение поля '" + fieldName + "' установлено: " + newValue,
-                    fieldName, null, newValue, author);
-        } else if (newValue == null && oldValue != null) {
-            logEvent(sectionId, "UPDATE", "Значение поля '" + fieldName + "' очищено",
-                    fieldName, oldValue, null, author);
-        } else {
-            logEvent(sectionId, "UPDATE", "Значение поля '" + fieldName + "' изменено с '" + oldValue + "' на '" + newValue + "'",
-                    fieldName, oldValue, newValue, author);
-        }
+    private void logStationEvent(String stationUid, String eventType, String description,
+                                 String fieldName, String oldValue, String newValue, String author) {
+        StationEventLog log = StationEventLog.builder()
+                .uid(UUID.randomUUID())
+                .stationUid(stationUid)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        stationEventLogRepository.save(log);
     }
 
     private SectionEventLogDto toEventDTO(SectionEventLog e) {

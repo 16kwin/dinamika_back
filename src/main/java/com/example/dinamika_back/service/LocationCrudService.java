@@ -1,15 +1,11 @@
-// LocationCrudService.java — ПОЛНЫЙ ФАЙЛ (с getAllWithSettings)
+// LocationCrudService.java — ПОЛНЫЙ ФАЙЛ (добавлено логирование в цеха)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.LocationEventLogDto;
 import com.example.dinamika_back.dto.LocationFlatDto;
 import com.example.dinamika_back.dto.LocationListResponse;
-import com.example.dinamika_back.model.Location;
-import com.example.dinamika_back.model.LocationEventLog;
-import com.example.dinamika_back.model.UserLocationColumnSettings;
-import com.example.dinamika_back.repository.LocationEventLogRepository;
-import com.example.dinamika_back.repository.LocationRepository;
-import com.example.dinamika_back.repository.UserLocationColumnSettingsRepository;
+import com.example.dinamika_back.model.*;
+import com.example.dinamika_back.repository.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +23,13 @@ public class LocationCrudService {
     private final LocationRepository locationRepository;
     private final LocationEventLogRepository eventLogRepository;
     private final UserLocationColumnSettingsRepository columnSettingsRepository;
+    private final UserService userService;
+    private final HoldingRepository holdingRepository;
+    private final HoldingEventLogRepository holdingEventLogRepository;
+    private final EnterpriseRepository enterpriseRepository;
+    private final EnterpriseEventLogRepository enterpriseEventLogRepository;
+    private final WorkshopRepository workshopRepository;
+    private final WorkshopEventLogRepository workshopEventLogRepository;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final List<String> ALL_COLUMNS_ORDER = List.of("name");
@@ -124,7 +127,7 @@ public class LocationCrudService {
         location.setName(name);
         location = locationRepository.save(location);
 
-        logEvent(location.getUid(), "CREATE", "Создание расположения", null, null, null, "Система");
+        logEvent(location.getUid(), "CREATE", "Создание расположения: '" + name + "'", null, null, null, userService.getCurrentUsername());
 
         return toDTO(location);
     }
@@ -134,12 +137,42 @@ public class LocationCrudService {
         Location location = locationRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Расположение не найдено: " + uid));
 
+        String author = userService.getCurrentUsername();
+
         if (name != null && !name.isBlank() && !location.getName().equals(name)) {
             if (locationRepository.existsByName(name)) {
                 throw new RuntimeException("Расположение с таким именем уже существует: " + name);
             }
-            logFieldChange(uid, "Наименование", location.getName(), name, "Система");
+            String oldName = location.getName();
+            logEvent(uid, "UPDATE", "'" + oldName + "': Значение поля 'Наименование' изменено с '" + oldName + "' на '" + name + "'",
+                    "Наименование", oldName, name, author);
             location.setName(name);
+
+            // Логируем в историю холдингов
+            List<Holding> relatedHoldings = holdingRepository.findByLocationUid(uid);
+            for (Holding holding : relatedHoldings) {
+                logHoldingEvent(holding.getId(), "UPDATE",
+                        "'" + holding.getName() + "': Значение поля 'Расположение' изменено с '" + oldName + "' на '" + name + "' через справочник 'Расположения'",
+                        "Расположение", oldName, name, author);
+            }
+
+            // Логируем в историю предприятий
+            List<Enterprise> relatedEnterprises = enterpriseRepository.findByLocationUid(uid);
+            for (Enterprise enterprise : relatedEnterprises) {
+                logEnterpriseEvent(enterprise.getId(), "UPDATE",
+                        "'" + enterprise.getName() + "': Значение поля 'Расположение' изменено с '" + oldName + "' на '" + name + "' через справочник 'Расположения'",
+                        "Расположение", oldName, name, author);
+            }
+
+            // Логируем в историю цехов
+            List<Workshop> relatedWorkshops = workshopRepository.findAll().stream()
+                    .filter(w -> w.getLocation() != null && w.getLocation().getUid().equals(uid))
+                    .collect(Collectors.toList());
+            for (Workshop workshop : relatedWorkshops) {
+                logWorkshopEvent(workshop.getId(), "UPDATE",
+                        "'" + workshop.getName() + "': Значение поля 'Расположение' изменено с '" + oldName + "' на '" + name + "' через справочник 'Расположения'",
+                        "Расположение", oldName, name, author);
+            }
         }
 
         location = locationRepository.save(location);
@@ -151,7 +184,36 @@ public class LocationCrudService {
         Location location = locationRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Расположение не найдено: " + uid));
 
-        logEvent(uid, "DELETE", "Удаление расположения", null, location.getName(), null, "Система");
+        String author = userService.getCurrentUsername();
+        String locationName = location.getName();
+
+        // Логируем в историю холдингов
+        List<Holding> relatedHoldings = holdingRepository.findByLocationUid(uid);
+        for (Holding holding : relatedHoldings) {
+            logHoldingEvent(holding.getId(), "UPDATE",
+                    "'" + holding.getName() + "': Значение поля 'Расположение' изменено с '" + locationName + "' на 'null' через справочник 'Расположения'",
+                    "Расположение", locationName, null, author);
+        }
+
+        // Логируем в историю предприятий
+        List<Enterprise> relatedEnterprises = enterpriseRepository.findByLocationUid(uid);
+        for (Enterprise enterprise : relatedEnterprises) {
+            logEnterpriseEvent(enterprise.getId(), "UPDATE",
+                    "'" + enterprise.getName() + "': Значение поля 'Расположение' изменено с '" + locationName + "' на 'null' через справочник 'Расположения'",
+                    "Расположение", locationName, null, author);
+        }
+
+        // Логируем в историю цехов
+        List<Workshop> relatedWorkshops = workshopRepository.findAll().stream()
+                .filter(w -> w.getLocation() != null && w.getLocation().getUid().equals(uid))
+                .collect(Collectors.toList());
+        for (Workshop workshop : relatedWorkshops) {
+            logWorkshopEvent(workshop.getId(), "UPDATE",
+                    "'" + workshop.getName() + "': Значение поля 'Расположение' изменено с '" + locationName + "' на 'null' через справочник 'Расположения'",
+                    "Расположение", locationName, null, author);
+        }
+
+        logEvent(uid, "DELETE", "Удаление расположения: '" + locationName + "'", null, locationName, null, author);
         locationRepository.delete(location);
     }
 
@@ -239,20 +301,55 @@ public class LocationCrudService {
         eventLogRepository.save(log);
     }
 
-    private void logFieldChange(UUID locationUid, String fieldName, String oldValue, String newValue, String author) {
-        if (oldValue == null && newValue == null) return;
-        if (oldValue != null && oldValue.equals(newValue)) return;
+    private void logHoldingEvent(Long holdingId, String eventType, String description,
+                                 String fieldName, String oldValue, String newValue, String author) {
+        HoldingEventLog log = HoldingEventLog.builder()
+                .uid(UUID.randomUUID())
+                .holdingId(holdingId)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        holdingEventLogRepository.save(log);
+    }
 
-        if (oldValue == null && newValue != null) {
-            logEvent(locationUid, "UPDATE", "Значение поля '" + fieldName + "' установлено: " + newValue,
-                    fieldName, null, newValue, author);
-        } else if (newValue == null && oldValue != null) {
-            logEvent(locationUid, "UPDATE", "Значение поля '" + fieldName + "' очищено",
-                    fieldName, oldValue, null, author);
-        } else {
-            logEvent(locationUid, "UPDATE", "Значение поля '" + fieldName + "' изменено с '" + oldValue + "' на '" + newValue + "'",
-                    fieldName, oldValue, newValue, author);
-        }
+    private void logEnterpriseEvent(Long enterpriseId, String eventType, String description,
+                                    String fieldName, String oldValue, String newValue, String author) {
+        EnterpriseEventLog log = EnterpriseEventLog.builder()
+                .uid(UUID.randomUUID())
+                .enterpriseId(enterpriseId)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        enterpriseEventLogRepository.save(log);
+    }
+
+    private void logWorkshopEvent(Long workshopId, String eventType, String description,
+                                  String fieldName, String oldValue, String newValue, String author) {
+        WorkshopEventLog log = WorkshopEventLog.builder()
+                .uid(UUID.randomUUID())
+                .workshopId(workshopId)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        workshopEventLogRepository.save(log);
     }
 
     private LocationEventLogDto toEventDTO(LocationEventLog e) {
