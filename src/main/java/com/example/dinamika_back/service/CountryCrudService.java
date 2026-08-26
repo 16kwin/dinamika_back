@@ -1,4 +1,4 @@
-// CountryCrudService.java — ПОЛНЫЙ ФАЙЛ (добавлено логирование в производителей)
+// CountryCrudService.java — ПОЛНЫЙ ФАЙЛ
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.CountryEventLogDto;
@@ -6,11 +6,13 @@ import com.example.dinamika_back.dto.CountryListResponse;
 import com.example.dinamika_back.dto.SprCountryDTO;
 import com.example.dinamika_back.model.CountryEventLog;
 import com.example.dinamika_back.model.SprCountry;
+import com.example.dinamika_back.model.SprMaterial;
 import com.example.dinamika_back.model.StationManufacturer;
 import com.example.dinamika_back.model.StationManufacturerEventLog;
 import com.example.dinamika_back.model.UserCountryColumnSettings;
 import com.example.dinamika_back.repository.CountryEventLogRepository;
 import com.example.dinamika_back.repository.SprCountryRepository;
+import com.example.dinamika_back.repository.SprMaterialRepository;
 import com.example.dinamika_back.repository.StationManufacturerEventLogRepository;
 import com.example.dinamika_back.repository.StationManufacturerRepository;
 import com.example.dinamika_back.repository.UserCountryColumnSettingsRepository;
@@ -34,6 +36,8 @@ public class CountryCrudService {
     private final UserService userService;
     private final StationManufacturerRepository manufacturerRepository;
     private final StationManufacturerEventLogRepository manufacturerEventLogRepository;
+    private final SprMaterialRepository materialRepository;
+    private final NomenclatureService nomenclatureService;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final List<String> ALL_COLUMNS_ORDER = List.of("name");
@@ -75,26 +79,16 @@ public class CountryCrudService {
                 Object value = entry.getValue();
                 
                 if (value instanceof Boolean) {
-                    if ((Boolean) value) {
-                        visibleColumns.add(key);
-                    }
+                    if ((Boolean) value) visibleColumns.add(key);
                 } else if (value instanceof Map) {
                     Map<String, Object> settings = (Map<String, Object>) value;
                     Object visible = settings.get("visible");
                     Object width = settings.get("width");
                     Object required = settings.get("required");
                     
-                    if (visible instanceof Boolean && (Boolean) visible) {
-                        visibleColumns.add(key);
-                    }
-                    
-                    if (width instanceof Number) {
-                        columnWidths.put(key, ((Number) width).doubleValue());
-                    }
-                    
-                    if (required instanceof Boolean && (Boolean) required) {
-                        requiredColumns.add(key);
-                    }
+                    if (visible instanceof Boolean && (Boolean) visible) visibleColumns.add(key);
+                    if (width instanceof Number) columnWidths.put(key, ((Number) width).doubleValue());
+                    if (required instanceof Boolean && (Boolean) required) requiredColumns.add(key);
                 }
             }
         } catch (Exception e) {
@@ -145,12 +139,18 @@ public class CountryCrudService {
                     "Наименование", oldName, name, author);
             country.setName(name);
 
-            // Логируем в историю производителей
+            // Логируем в производителей станций
             List<StationManufacturer> relatedManufacturers = manufacturerRepository.findByCountryUid(uid);
             for (StationManufacturer manufacturer : relatedManufacturers) {
                 logManufacturerEvent(manufacturer.getUid(), "UPDATE",
                         "'" + manufacturer.getName() + "': Значение поля 'Страна' изменено с '" + oldName + "' на '" + name + "' через справочник 'Страны'",
                         "Страна", oldName, name, author);
+            }
+
+            // Логируем в номенклатуру
+            List<SprMaterial> relatedMaterials = materialRepository.findByCountryUid(uid);
+            for (SprMaterial material : relatedMaterials) {
+                nomenclatureService.logEventFromReference(material.getUid(), "Страна происхождения", oldName, name, author, "справочник 'Страны'");
             }
         }
 
@@ -166,12 +166,22 @@ public class CountryCrudService {
         String author = userService.getCurrentUsername();
         String countryName = country.getName();
 
-        // Логируем в историю производителей
+        // Логируем в производителей станций
         List<StationManufacturer> relatedManufacturers = manufacturerRepository.findByCountryUid(uid);
         for (StationManufacturer manufacturer : relatedManufacturers) {
             logManufacturerEvent(manufacturer.getUid(), "UPDATE",
                     "'" + manufacturer.getName() + "': Значение поля 'Страна' изменено с '" + countryName + "' на 'null' через справочник 'Страны'",
                     "Страна", countryName, null, author);
+            manufacturer.setCountry(null);
+            manufacturerRepository.save(manufacturer);
+        }
+
+        // Логируем в номенклатуру и обнуляем привязку
+        List<SprMaterial> relatedMaterials = materialRepository.findByCountryUid(uid);
+        for (SprMaterial material : relatedMaterials) {
+            nomenclatureService.logEventFromReference(material.getUid(), "Страна происхождения", countryName, null, author, "справочник 'Страны'");
+            material.setCountry(null);
+            materialRepository.save(material);
         }
 
         logEvent(uid, "DELETE", "Удаление страны: '" + countryName + "'", null, countryName, null, author);

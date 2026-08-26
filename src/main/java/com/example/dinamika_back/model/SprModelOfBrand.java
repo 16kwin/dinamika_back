@@ -1,20 +1,23 @@
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
-import lombok.Getter;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
+
 import java.util.UUID;
 
 @Entity
 @Table(name = "spr_model_of_brand")
-@Getter
-@Setter
+@Data
+@Builder
 @NoArgsConstructor
+@AllArgsConstructor
 public class SprModelOfBrand {
 
     @Id
-    @Column(name = "uid", nullable = false)
+    @Column(name = "uid")
     private UUID uid;
 
     @Column(name = "name", nullable = false)
@@ -26,4 +29,8 @@ public class SprModelOfBrand {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "brand")
     private SprBrand brand;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "manufacturer_uid")
+    private SprManufacturer manufacturer;
 }

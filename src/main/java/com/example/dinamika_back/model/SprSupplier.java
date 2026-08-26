@@ -4,7 +4,6 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -19,24 +18,24 @@ public class SprSupplier {
     @Column(name = "uid", nullable = false)
     private UUID uid;
 
-    @Column(name = "code")
-    private Integer code;
-
     @Column(name = "name", nullable = false)
     private String name;
 
-    @ManyToOne
+    @Column(name = "code")
+    private Integer code;
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "country_uid")
     private SprCountry country;
 
     @Column(name = "address")
     private String address;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "short_description_uid")
     private SprSupplierDescriptionType shortDescription;
 
-    @Column(name = "description", columnDefinition = "text")
+    @Column(name = "description")
     private String description;
 
     @Column(name = "email")
@@ -48,11 +47,8 @@ public class SprSupplier {
     @Column(name = "phone")
     private String phone;
 
-    @ManyToOne
-    @JoinColumn(name = "brand_uid")
-    private SprBrand brand;
+    // Поле brand_uid удалено из БД и из модели
 
-    // Реквизиты
     @Column(name = "inn")
     private String inn;
 

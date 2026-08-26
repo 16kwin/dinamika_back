@@ -1,17 +1,17 @@
-// SprSupplierDTO.java — ПОЛНЫЙ
 package com.example.dinamika_back.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
 public class SprSupplierDTO {
     private UUID uid;
     private Integer code;
@@ -25,9 +25,7 @@ public class SprSupplierDTO {
     private String email;
     private String website;
     private String phone;
-    private UUID brandUid;
-    private String brandName;
-    // Реквизиты
+    // brandUid и brandName удалены
     private String inn;
     private String ogrn;
     private String kpp;

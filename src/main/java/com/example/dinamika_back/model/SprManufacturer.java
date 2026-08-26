@@ -22,4 +22,27 @@ public class SprManufacturer {
 
     @Column(name = "description")
     private String description;
+
+    @Column(name = "code")
+    private Integer code;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "country_uid")
+    private SprCountry country;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "direction_uid")
+    private SprProductionDirection direction;
+
+    @Column(name = "address")
+    private String address;
+
+    @Column(name = "email")
+    private String email;
+
+    @Column(name = "website")
+    private String website;
+
+    @Column(name = "phone")
+    private String phone;
 }

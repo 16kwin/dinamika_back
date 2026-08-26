@@ -1,7 +1,7 @@
-// SupplierSaveRequest.java
 package com.example.dinamika_back.dto;
 
 import lombok.Data;
+
 import java.util.UUID;
 
 @Data
@@ -16,7 +16,7 @@ public class SupplierSaveRequest {
     private String email;
     private String website;
     private String phone;
-    private UUID brandUid;
+    // brandUid удален
     private String inn;
     private String ogrn;
     private String kpp;

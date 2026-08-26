@@ -1,11 +1,12 @@
 package com.example.dinamika_back.dto;
 
-import lombok.Getter;
-import lombok.Setter;
+import lombok.Data;
 
-@Getter
-@Setter
+import java.util.UUID;
+
+@Data
 public class CreateMeasureRequest {
     private String name;
     private String description;
+    private UUID groupUid;
 }

@@ -1,4 +1,3 @@
-// SupplierService.java — ПОЛНЫЙ ФАЙЛ (добавлен materialName в поставки)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -23,7 +22,6 @@ public class SupplierService {
 
     private final SprSupplierRepository supplierRepository;
     private final SprCountryRepository countryRepository;
-    private final SprBrandRepository brandRepository;
     private final SprSupplierDescriptionTypeRepository descriptionTypeRepository;
     private final SprSupplierImageRepository imageRepository;
     private final SprSupplierDocumentRepository documentRepository;
@@ -32,6 +30,8 @@ public class SupplierService {
     private final RegSupplierEventLogRepository eventLogRepository;
     private final RegSuppliersRepository regSuppliersRepository;
     private final SprMaterialRepository materialRepository;
+    private final SprSupplierBrandRepository supplierBrandRepository;
+    private final SupplierBrandEventLogRepository supplierBrandEventLogRepository;
 
     private static final String SUPPLIER_UPLOAD_DIR = "uploads/suppliers/";
 
@@ -76,7 +76,7 @@ public class SupplierService {
 
     public SupplierCreateResponse generateCode() {
         Integer maxCode = supplierRepository.findMaxCode();
-        Integer code = maxCode + 1;
+        Integer code = maxCode != null ? maxCode + 1 : 1;
         return new SupplierCreateResponse(UUID.randomUUID(), code);
     }
 
@@ -219,9 +219,6 @@ public class SupplierService {
         if (request.getCountryUid() != null) {
             supplier.setCountry(countryRepository.findById(request.getCountryUid()).orElse(null));
         }
-        if (request.getBrandUid() != null) {
-            supplier.setBrand(brandRepository.findById(request.getBrandUid()).orElse(null));
-        }
         if (request.getShortDescriptionUid() != null) {
             supplier.setShortDescription(descriptionTypeRepository.findById(request.getShortDescriptionUid()).orElse(null));
         }
@@ -237,6 +234,23 @@ public class SupplierService {
 
     @Transactional
     public void deleteSupplier(UUID uid) {
+        SprSupplier supplier = supplierRepository.findById(uid)
+                .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + uid));
+
+        String author = "Система";
+
+        List<SprSupplierBrand> relatedBrands = supplierBrandRepository.findBySupplierUid(uid);
+        for (SprSupplierBrand brand : relatedBrands) {
+            logSupplierBrandEvent(brand.getUid(), "UPDATE",
+                    "'" + brand.getName() + "': Значение поля 'Поставщик' изменено с '" + supplier.getName() + "' на 'null' через справочник 'Поставщики'",
+                    "Поставщик", supplier.getName(), null, author);
+            brand.setSupplier(null);
+            supplierBrandRepository.save(brand);
+        }
+
+        logEvent(uid, "DELETE", "Удаление поставщика: '" + supplier.getName() + "'",
+                null, supplier.getName(), null, author);
+
         deleteAllSupplierMedia(uid);
         supplierRepository.deleteById(uid);
     }
@@ -408,6 +422,19 @@ public class SupplierService {
                 .collect(Collectors.toList());
     }
 
+    // ==================== БРЕНДЫ ПОСТАВЩИКА ====================
+
+public List<SupplierBrandDTO> getBrands(UUID supplierUid) {
+    return supplierBrandRepository.findBySupplierUid(supplierUid).stream()
+            .map(brand -> SupplierBrandDTO.builder()
+                    .uid(brand.getUid())
+                    .name(brand.getName())
+                    .supplierUid(brand.getSupplier() != null ? brand.getSupplier().getUid() : null)
+                    .supplierName(brand.getSupplier() != null ? brand.getSupplier().getName() : null)
+                    .build())
+            .collect(Collectors.toList());
+}
+
     // ==================== ПОСТАВКИ ====================
 
     public List<MaterialSupplyDTO> getDeliveries(UUID supplierUid) {
@@ -521,6 +548,25 @@ public class SupplierService {
         } catch (IOException e) { e.printStackTrace(); }
     }
 
+    // ==================== ЛОГИРОВАНИЕ БРЕНДОВ ПОСТАВЩИКОВ ====================
+
+    private void logSupplierBrandEvent(UUID brandUid, String eventType, String description,
+                                       String fieldName, String oldValue, String newValue, String author) {
+        SupplierBrandEventLog log = SupplierBrandEventLog.builder()
+                .uid(UUID.randomUUID())
+                .supplierBrandUid(brandUid)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(author)
+                .source("Через справочник 'Поставщики'")
+                .createdAt(LocalDateTime.now())
+                .build();
+        supplierBrandEventLogRepository.save(log);
+    }
+
     // ==================== DTO конвертер ====================
 
     private SprSupplierDTO toDTO(SprSupplier s) {
@@ -532,8 +578,6 @@ public class SupplierService {
                 .shortDescriptionUid(s.getShortDescription() != null ? s.getShortDescription().getUid() : null)
                 .shortDescriptionName(s.getShortDescription() != null ? s.getShortDescription().getName() : null)
                 .description(s.getDescription()).email(s.getEmail()).website(s.getWebsite()).phone(s.getPhone())
-                .brandUid(s.getBrand() != null ? s.getBrand().getUid() : null)
-                .brandName(s.getBrand() != null ? s.getBrand().getName() : null)
                 .inn(s.getInn()).ogrn(s.getOgrn()).kpp(s.getKpp())
                 .contactPerson(s.getContactPerson()).contactPosition(s.getContactPosition()).contactPhone(s.getContactPhone())
                 .director(s.getDirector()).directorPosition(s.getDirectorPosition())

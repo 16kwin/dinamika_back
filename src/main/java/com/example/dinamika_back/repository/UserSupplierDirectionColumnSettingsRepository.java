@@ -1,0 +1,12 @@
+package com.example.dinamika_back.repository;
+
+import com.example.dinamika_back.model.UserSupplierDirectionColumnSettings;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface UserSupplierDirectionColumnSettingsRepository extends JpaRepository<UserSupplierDirectionColumnSettings, Long> {
+    Optional<UserSupplierDirectionColumnSettings> findByUserId(Integer userId);
+}

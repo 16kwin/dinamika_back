@@ -28,6 +28,24 @@ public interface SprMaterialRepository extends JpaRepository<SprMaterial, UUID> 
     /** Найти все материалы бренда */
     List<SprMaterial> findByBrandUid(UUID brandUid);
     
+    /** Найти все материалы модели */
+    List<SprMaterial> findByModelOfBrandUid(UUID modelOfBrandUid);
+    
+    /** Найти все материалы страны */
+    List<SprMaterial> findByCountryUid(UUID countryUid);
+    
+    /** Найти все материалы группы учета */
+    List<SprMaterial> findByTypeMainUid(UUID typeMainUid);
+    
+    /** Найти все материалы группы номенклатуры */
+    List<SprMaterial> findByTypePurposeUid(UUID typePurposeUid);
+    
+    /** Найти все материалы вида номенклатуры */
+    List<SprMaterial> findByTypeProductUid(UUID typeProductUid);
+    
+    /** Найти все материалы по единице измерения */
+    List<SprMaterial> findByMeasureUid(UUID measureUid);
+    
     /** Проверка существования материала по коду */
     boolean existsByCodeMaterial(Integer codeMaterial);
     

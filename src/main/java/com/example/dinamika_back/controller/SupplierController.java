@@ -1,4 +1,3 @@
-// SupplierController.java — ПОЛНЫЙ ФАЙЛ (добавлены поставки и ассортимент)
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
@@ -127,6 +126,13 @@ public class SupplierController {
     @GetMapping("/{supplierUid}/events")
     public ResponseEntity<List<SupplierEventLogDTO>> getEvents(@PathVariable UUID supplierUid) {
         return ResponseEntity.ok(supplierService.getEvents(supplierUid));
+    }
+
+    // ==================== БРЕНДЫ ПОСТАВЩИКА ====================
+
+    @GetMapping("/{supplierUid}/brands")
+    public ResponseEntity<List<SupplierBrandDTO>> getBrands(@PathVariable UUID supplierUid) {
+        return ResponseEntity.ok(supplierService.getBrands(supplierUid));
     }
 
     // ==================== ПОСТАВКИ ====================

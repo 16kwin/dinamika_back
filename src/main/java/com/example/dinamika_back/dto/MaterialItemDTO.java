@@ -22,4 +22,20 @@ public class MaterialItemDTO {
     private String typeMainName;
     private String typePurposeName;
     private String typeProductName;
+    
+    // Поля для штрихкода и SKU
+    private String barcode;
+    private String sku;
+    
+    // Дополнительные поля для фильтрации и отображения
+    private Integer rating;
+    private String description;
+    private Boolean usage;
+    private Boolean wasteMaterial;
+    private Boolean recycleMaterial;
+    private String manufacturerName;
+    private String countryName;
+    private String brandName;
+    private String modelName;
+    private Double lastPrice;
 }

@@ -9,4 +9,6 @@ import java.util.UUID;
 @Repository
 public interface RegEventLogRepository extends JpaRepository<RegEventLog, UUID> {
     List<RegEventLog> findByMaterialUidOrderByCreatedAtDesc(UUID materialUid);
+    
+    List<RegEventLog> findAllByOrderByCreatedAtDesc();
 }

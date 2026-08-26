@@ -1,4 +1,3 @@
-// SprTypeAttributes.java
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
@@ -22,6 +21,6 @@ public class SprTypeAttributes {
     private String designation;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "data_type")
-    private DataType dataType;
+    @JoinColumn(name = "group_uid")
+    private SprAttributeGroup group;
 }
