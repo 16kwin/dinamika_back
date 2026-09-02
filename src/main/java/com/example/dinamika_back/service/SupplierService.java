@@ -1,3 +1,4 @@
+// SupplierService.java — ПОЛНЫЙ ФАЙЛ (добавлен renameDocument)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -275,7 +276,6 @@ public class SupplierService {
         SprSupplier supplier = supplierRepository.findById(supplierUid)
                 .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + supplierUid));
         
-        // Берём максимальный sortOrder и добавляем 1
         List<SprSupplierImage> images = imageRepository.findBySupplierUidOrderBySortOrderAsc(supplierUid);
         int nextSortOrder = images.isEmpty() 
             ? 0 
@@ -333,6 +333,23 @@ public class SupplierService {
         return new SupplierDocumentDTO(document.getUid(), supplierUid, document.getDocumentName(),
                 document.getFilePath(), document.getOriginalName(),
                 getFileUrl(supplierUid, fileName), document.getCreatedAt());
+    }
+
+    @Transactional
+    public SupplierDocumentDTO renameDocument(UUID documentUid, String newDocumentName) {
+        SprSupplierDocument document = documentRepository.findById(documentUid)
+                .orElseThrow(() -> new RuntimeException("Документ не найден: " + documentUid));
+        String oldName = document.getDocumentName();
+        document.setDocumentName(newDocumentName);
+        documentRepository.save(document);
+        
+        UUID supplierUid = document.getSupplier().getUid();
+        logEvent(supplierUid, "UPDATE", "Документ переименован с '" + oldName + "' на '" + newDocumentName + "'",
+                "Документ", oldName, newDocumentName, "Система");
+        
+        return new SupplierDocumentDTO(document.getUid(), supplierUid, document.getDocumentName(),
+                document.getFilePath(), document.getOriginalName(),
+                getFileUrl(supplierUid, document.getFilePath()), document.getCreatedAt());
     }
 
     @Transactional
