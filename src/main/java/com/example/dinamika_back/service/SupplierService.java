@@ -274,8 +274,13 @@ public class SupplierService {
         String fileName = saveFile(supplierUid, file);
         SprSupplier supplier = supplierRepository.findById(supplierUid)
                 .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + supplierUid));
-        long count = imageRepository.findBySupplierUidOrderBySortOrderAsc(supplierUid).size();
-        int nextSortOrder = (int) count;
+        
+        // Берём максимальный sortOrder и добавляем 1
+        List<SprSupplierImage> images = imageRepository.findBySupplierUidOrderBySortOrderAsc(supplierUid);
+        int nextSortOrder = images.isEmpty() 
+            ? 0 
+            : images.stream().mapToInt(SprSupplierImage::getSortOrder).max().orElse(0) + 1;
+        
         SprSupplierImage image = new SprSupplierImage();
         image.setUid(UUID.randomUUID());
         image.setSupplier(supplier);
@@ -424,16 +429,16 @@ public class SupplierService {
 
     // ==================== БРЕНДЫ ПОСТАВЩИКА ====================
 
-public List<SupplierBrandDTO> getBrands(UUID supplierUid) {
-    return supplierBrandRepository.findBySupplierUid(supplierUid).stream()
-            .map(brand -> SupplierBrandDTO.builder()
-                    .uid(brand.getUid())
-                    .name(brand.getName())
-                    .supplierUid(brand.getSupplier() != null ? brand.getSupplier().getUid() : null)
-                    .supplierName(brand.getSupplier() != null ? brand.getSupplier().getName() : null)
-                    .build())
-            .collect(Collectors.toList());
-}
+    public List<SupplierBrandDTO> getBrands(UUID supplierUid) {
+        return supplierBrandRepository.findBySupplierUid(supplierUid).stream()
+                .map(brand -> SupplierBrandDTO.builder()
+                        .uid(brand.getUid())
+                        .name(brand.getName())
+                        .supplierUid(brand.getSupplier() != null ? brand.getSupplier().getUid() : null)
+                        .supplierName(brand.getSupplier() != null ? brand.getSupplier().getName() : null)
+                        .build())
+                .collect(Collectors.toList());
+    }
 
     // ==================== ПОСТАВКИ ====================
 
