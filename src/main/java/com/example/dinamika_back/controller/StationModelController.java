@@ -3,8 +3,11 @@ package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
 import com.example.dinamika_back.service.StationModelService;
+import com.example.dinamika_back.service.PdfExportService;
 import com.example.dinamika_back.service.StationModelColumnSettingsService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -19,6 +22,7 @@ public class StationModelController {
 
     private final StationModelService stationModelService;
     private final StationModelColumnSettingsService columnSettingsService;
+    private final PdfExportService pdfExportService;
 
     // ==================== CRUD ====================
 
@@ -48,7 +52,8 @@ public class StationModelController {
     }
 
     @PatchMapping("/{uid}")
-    public ResponseEntity<StationModelDto> update(@PathVariable UUID uid, @RequestBody UpdateStationModelRequest request) {
+    public ResponseEntity<StationModelDto> update(@PathVariable UUID uid,
+            @RequestBody UpdateStationModelRequest request) {
         return ResponseEntity.ok(stationModelService.update(uid, request));
     }
 
@@ -66,9 +71,13 @@ public class StationModelController {
     }
 
     @PostMapping("/{modelUid}/images")
-    public ResponseEntity<StationModelImageDto> uploadImage(@PathVariable UUID modelUid, @RequestParam("file") MultipartFile file) {
-        try { return ResponseEntity.ok(stationModelService.uploadImage(modelUid, file)); }
-        catch (IOException e) { return ResponseEntity.internalServerError().build(); }
+    public ResponseEntity<StationModelImageDto> uploadImage(@PathVariable UUID modelUid,
+            @RequestParam("file") MultipartFile file) {
+        try {
+            return ResponseEntity.ok(stationModelService.uploadImage(modelUid, file));
+        } catch (IOException e) {
+            return ResponseEntity.internalServerError().build();
+        }
     }
 
     @DeleteMapping("/images/{imageUid}")
@@ -89,8 +98,11 @@ public class StationModelController {
             @PathVariable UUID modelUid,
             @RequestParam("file") MultipartFile file,
             @RequestParam("documentName") String documentName) {
-        try { return ResponseEntity.ok(stationModelService.uploadDocument(modelUid, documentName, file)); }
-        catch (IOException e) { return ResponseEntity.internalServerError().build(); }
+        try {
+            return ResponseEntity.ok(stationModelService.uploadDocument(modelUid, documentName, file));
+        } catch (IOException e) {
+            return ResponseEntity.internalServerError().build();
+        }
     }
 
     @PatchMapping("/documents/{documentUid}/rename")
@@ -124,10 +136,10 @@ public class StationModelController {
     public ResponseEntity<Map<String, String>> getAllSettings(@RequestParam Integer userId) {
         Map<String, String> settings = Map.of(
                 "columnsJson", columnSettingsService.getColumnsJson(userId) != null
-                        ? columnSettingsService.getColumnsJson(userId) : "{}",
+                        ? columnSettingsService.getColumnsJson(userId)
+                        : "{}",
                 "filtersJson", columnSettingsService.getFiltersJson(userId),
-                "sortJson", columnSettingsService.getSortJson(userId)
-        );
+                "sortJson", columnSettingsService.getSortJson(userId));
         return ResponseEntity.ok(settings);
     }
 
@@ -140,7 +152,8 @@ public class StationModelController {
     }
 
     @PatchMapping("/columns-settings")
-    public ResponseEntity<Void> saveColumnsSettings(@RequestParam Integer userId, @RequestBody Map<String, Object> body) {
+    public ResponseEntity<Void> saveColumnsSettings(@RequestParam Integer userId,
+            @RequestBody Map<String, Object> body) {
         String columnsJson = (String) body.get("columnsJson");
         columnSettingsService.saveColumnsJson(userId, columnsJson);
         return ResponseEntity.ok().build();
@@ -154,7 +167,8 @@ public class StationModelController {
     }
 
     @PatchMapping("/filters-settings")
-    public ResponseEntity<Void> saveFiltersSettings(@RequestParam Integer userId, @RequestBody Map<String, Object> body) {
+    public ResponseEntity<Void> saveFiltersSettings(@RequestParam Integer userId,
+            @RequestBody Map<String, Object> body) {
         String filtersJson = (String) body.get("filtersJson");
         columnSettingsService.saveFiltersJson(userId, filtersJson);
         return ResponseEntity.ok().build();
@@ -172,5 +186,43 @@ public class StationModelController {
         String sortJson = (String) body.get("sortJson");
         columnSettingsService.saveSortJson(userId, sortJson);
         return ResponseEntity.ok().build();
+    }
+
+    // ==================== ПДФ и ПЕЧАТЬ ====================
+
+    @PostMapping("/export-pdf")
+    public ResponseEntity<byte[]> exportPdf(@RequestBody Map<String, Object> request) throws Exception {
+        String title = (String) request.get("title");
+        List<String> columns = (List<String>) request.get("columns");
+        List<String> columnLabels = (List<String>) request.get("columnLabels");
+        List<Map<String, Object>> data = (List<Map<String, Object>>) request.get("data");
+        boolean landscape = (boolean) request.getOrDefault("landscape", false);
+        List<String> footerLines = (List<String>) request.get("footerLines");
+
+        byte[] pdf = pdfExportService.generatePdf(title, columns, columnLabels, data, landscape, footerLines);
+        return buildPdfResponse(pdf, "export.pdf", false);
+    }
+
+    @PostMapping("/print")
+    public ResponseEntity<byte[]> print(@RequestBody Map<String, Object> request) throws Exception {
+        String title = (String) request.get("title");
+        List<String> columns = (List<String>) request.get("columns");
+        List<String> columnLabels = (List<String>) request.get("columnLabels");
+        List<Map<String, Object>> data = (List<Map<String, Object>>) request.get("data");
+        boolean landscape = (boolean) request.getOrDefault("landscape", false);
+        List<String> footerLines = (List<String>) request.get("footerLines");
+
+        byte[] pdf = pdfExportService.generatePdf(title, columns, columnLabels, data, landscape, footerLines);
+        return buildPdfResponse(pdf, "print.pdf", true);
+    }
+
+    private ResponseEntity<byte[]> buildPdfResponse(byte[] pdf, String filename, boolean inline) {
+        String contentDisposition = inline
+                ? "inline; filename=\"" + filename + "\""
+                : "attachment; filename=\"" + filename + "\"";
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition)
+                .body(pdf);
     }
 }
