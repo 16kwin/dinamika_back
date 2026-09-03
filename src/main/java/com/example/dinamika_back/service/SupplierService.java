@@ -1,4 +1,4 @@
-// SupplierService.java — ПОЛНЫЙ ФАЙЛ (добавлен renameDocument)
+// SupplierService.java — ПОЛНЫЙ ФАЙЛ (автоматический автор для рейтингов)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -33,6 +33,7 @@ public class SupplierService {
     private final SprMaterialRepository materialRepository;
     private final SprSupplierBrandRepository supplierBrandRepository;
     private final SupplierBrandEventLogRepository supplierBrandEventLogRepository;
+    private final UserService userService;
 
     private static final String SUPPLIER_UPLOAD_DIR = "uploads/suppliers/";
 
@@ -238,7 +239,7 @@ public class SupplierService {
         SprSupplier supplier = supplierRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + uid));
 
-        String author = "Система";
+        String author = userService.getCurrentUsername();
 
         List<SprSupplierBrand> relatedBrands = supplierBrandRepository.findBySupplierUid(uid);
         for (SprSupplierBrand brand : relatedBrands) {
@@ -276,6 +277,8 @@ public class SupplierService {
         SprSupplier supplier = supplierRepository.findById(supplierUid)
                 .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + supplierUid));
         
+        String author = userService.getCurrentUsername();
+        
         List<SprSupplierImage> images = imageRepository.findBySupplierUidOrderBySortOrderAsc(supplierUid);
         int nextSortOrder = images.isEmpty() 
             ? 0 
@@ -289,7 +292,7 @@ public class SupplierService {
         image.setSortOrder(nextSortOrder);
         imageRepository.save(image);
         logEvent(supplierUid, "ADD", "Добавлено изображение '" + file.getOriginalFilename() + "'",
-                "Изображение", null, file.getOriginalFilename(), "Система");
+                "Изображение", null, file.getOriginalFilename(), author);
         return new SupplierMediaDTO(image.getUid(), supplierUid, fileName, file.getOriginalFilename(),
                 getFileUrl(supplierUid, fileName), nextSortOrder);
     }
@@ -300,10 +303,11 @@ public class SupplierService {
                 .orElseThrow(() -> new RuntimeException("Изображение не найдено: " + uid));
         UUID supplierUid = image.getSupplier().getUid();
         String fileName = image.getOriginalName();
+        String author = userService.getCurrentUsername();
         deleteFile(supplierUid, image.getFilePath());
         imageRepository.delete(image);
         logEvent(supplierUid, "DELETE", "Удалено изображение '" + fileName + "'",
-                "Изображение", fileName, null, "Система");
+                "Изображение", fileName, null, author);
     }
 
     // ==================== ДОКУМЕНТЫ ====================
@@ -321,6 +325,7 @@ public class SupplierService {
         String fileName = saveFile(supplierUid, file);
         SprSupplier supplier = supplierRepository.findById(supplierUid)
                 .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + supplierUid));
+        String author = userService.getCurrentUsername();
         SprSupplierDocument document = new SprSupplierDocument();
         document.setUid(UUID.randomUUID());
         document.setSupplier(supplier);
@@ -329,7 +334,7 @@ public class SupplierService {
         document.setOriginalName(file.getOriginalFilename());
         documentRepository.save(document);
         logEvent(supplierUid, "ADD", "Добавлен документ '" + documentName + "'",
-                "Документ", null, documentName, "Система");
+                "Документ", null, documentName, author);
         return new SupplierDocumentDTO(document.getUid(), supplierUid, document.getDocumentName(),
                 document.getFilePath(), document.getOriginalName(),
                 getFileUrl(supplierUid, fileName), document.getCreatedAt());
@@ -340,12 +345,13 @@ public class SupplierService {
         SprSupplierDocument document = documentRepository.findById(documentUid)
                 .orElseThrow(() -> new RuntimeException("Документ не найден: " + documentUid));
         String oldName = document.getDocumentName();
+        String author = userService.getCurrentUsername();
         document.setDocumentName(newDocumentName);
         documentRepository.save(document);
         
         UUID supplierUid = document.getSupplier().getUid();
         logEvent(supplierUid, "UPDATE", "Документ переименован с '" + oldName + "' на '" + newDocumentName + "'",
-                "Документ", oldName, newDocumentName, "Система");
+                "Документ", oldName, newDocumentName, author);
         
         return new SupplierDocumentDTO(document.getUid(), supplierUid, document.getDocumentName(),
                 document.getFilePath(), document.getOriginalName(),
@@ -358,10 +364,11 @@ public class SupplierService {
                 .orElseThrow(() -> new RuntimeException("Документ не найден: " + uid));
         UUID supplierUid = document.getSupplier().getUid();
         String docName = document.getDocumentName();
+        String author = userService.getCurrentUsername();
         deleteFile(supplierUid, document.getFilePath());
         documentRepository.delete(document);
         logEvent(supplierUid, "DELETE", "Удален документ '" + docName + "'",
-                "Документ", docName, null, "Система");
+                "Документ", docName, null, author);
     }
 
     // ==================== РЕЙТИНГ ====================
@@ -381,15 +388,18 @@ public class SupplierService {
     public SupplierRatingDTO addRating(UUID supplierUid, AddSupplierRatingRequest request) {
         SprSupplier supplier = supplierRepository.findById(supplierUid)
                 .orElseThrow(() -> new RuntimeException("Поставщик не найден: " + supplierUid));
+        
+        String author = userService.getCurrentUsername();
+        
         RegSupplierRating rating = new RegSupplierRating();
         rating.setUid(UUID.randomUUID());
         rating.setSupplier(supplier);
         rating.setRating(request.getRating());
         rating.setComment(request.getComment());
-        rating.setAuthor(request.getAuthor());
+        rating.setAuthor(author);
         ratingRepository.save(rating);
-        logEvent(supplierUid, "ADD", "Добавлен отзыв от '" + request.getAuthor() + "': " + request.getRating() + " звезд",
-                "Рейтинг", null, request.getRating().toString(), request.getAuthor());
+        logEvent(supplierUid, "ADD", "Добавлен отзыв: " + request.getRating() + " звезд",
+                "Рейтинг", null, request.getRating().toString(), author);
         return new SupplierRatingDTO(rating.getUid(), supplierUid, rating.getRating(),
                 rating.getComment(), rating.getAuthor(), rating.getCreatedAt());
     }
@@ -398,8 +408,9 @@ public class SupplierService {
     public void deleteRating(UUID ratingUid) {
         RegSupplierRating rating = ratingRepository.findById(ratingUid).orElse(null);
         if (rating != null) {
-            logEvent(rating.getSupplier().getUid(), "DELETE", "Удален отзыв от '" + rating.getAuthor() + "'",
-                    "Рейтинг", rating.getRating().toString(), null, rating.getAuthor());
+            String author = userService.getCurrentUsername();
+            logEvent(rating.getSupplier().getUid(), "DELETE", "Удален отзыв",
+                    "Рейтинг", rating.getRating().toString(), null, author);
         }
         ratingRepository.deleteById(ratingUid);
     }
@@ -483,6 +494,8 @@ public class SupplierService {
         SprMaterial material = materialRepository.findById(materialUid)
                 .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid));
 
+        String author = userService.getCurrentUsername();
+
         RegSuppliers regSuppliers = new RegSuppliers();
         regSuppliers.setUid(UUID.randomUUID());
         regSuppliers.setMaterial(material);
@@ -499,7 +512,7 @@ public class SupplierService {
         regSuppliersRepository.save(regSuppliers);
 
         logEvent(supplierUid, "ADD", "Добавлена поставка материала '" + material.getNameMaterial() + "'",
-                "Поставка", null, material.getNameMaterial(), "Система");
+                "Поставка", null, material.getNameMaterial(), author);
 
         return new MaterialSupplyDTO(
                 regSuppliers.getUid(),
@@ -520,12 +533,13 @@ public class SupplierService {
         if (regSuppliers != null) {
             UUID supplierUid = regSuppliers.getSupplier().getUid();
             String materialName = regSuppliers.getMaterial() != null ? regSuppliers.getMaterial().getNameMaterial() : "";
+            String author = userService.getCurrentUsername();
             if (regSuppliers.getFilePath() != null) {
                 deleteFile(supplierUid, regSuppliers.getFilePath());
             }
             regSuppliersRepository.deleteById(uid);
             logEvent(supplierUid, "DELETE", "Удалена поставка материала '" + materialName + "'",
-                    "Поставка", materialName, null, "Система");
+                    "Поставка", materialName, null, author);
         } else {
             regSuppliersRepository.deleteById(uid);
         }
