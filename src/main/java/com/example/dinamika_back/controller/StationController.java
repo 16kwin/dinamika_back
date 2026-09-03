@@ -6,6 +6,7 @@ import com.example.dinamika_back.model.DocPattern;
 import com.example.dinamika_back.model.Station;
 import com.example.dinamika_back.repository.DocPatternRepository;
 import com.example.dinamika_back.repository.StationRepository;
+import com.example.dinamika_back.service.OfficeExportService;
 import com.example.dinamika_back.service.PdfExportService;
 import com.example.dinamika_back.service.StationColumnSettingsService;
 import com.example.dinamika_back.service.StationCrudService;
@@ -24,6 +25,7 @@ import java.util.UUID;
 @RequestMapping("/api/stations")
 public class StationController {
 
+    private final OfficeExportService officeExportService;
     private final StationService stationService;
     private final StationCrudService stationCrudService;
     private final StationColumnSettingsService columnSettingsService;
@@ -37,13 +39,14 @@ public class StationController {
             StationColumnSettingsService columnSettingsService,
             StationRepository stationRepository,
             DocPatternRepository docPatternRepository,
-            PdfExportService pdfExportService) {
+            PdfExportService pdfExportService, OfficeExportService officeExportService) {
         this.stationService = stationService;
         this.stationCrudService = stationCrudService;
         this.columnSettingsService = columnSettingsService;
         this.stationRepository = stationRepository;
         this.docPatternRepository = docPatternRepository;
         this.pdfExportService = pdfExportService;
+        this.officeExportService = officeExportService;
     }
 
     // ==================== Мониторинг ====================
@@ -137,7 +140,7 @@ public class StationController {
         return ResponseEntity.ok().build();
     }
 
-    // ==================== ПДФ и ПЕЧАТЬ ====================
+    // ==================== ПДФ, ВОРД, ЭКСЕЛЬ и ПЕЧАТЬ ====================
 
     @PostMapping("/crud/export-pdf")
     public ResponseEntity<byte[]> exportPdf(@RequestBody Map<String, Object> request) throws Exception {
@@ -173,6 +176,38 @@ public class StationController {
                 .contentType(MediaType.APPLICATION_PDF)
                 .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition)
                 .body(pdf);
+    }
+
+    @PostMapping("/crud/export-excel")
+    public ResponseEntity<byte[]> exportExcel(@RequestBody Map<String, Object> request) throws Exception {
+        String title = (String) request.get("title");
+        List<String> columns = (List<String>) request.get("columns");
+        List<String> columnLabels = (List<String>) request.get("columnLabels");
+        List<Map<String, Object>> data = (List<Map<String, Object>>) request.get("data");
+        List<String> footerLines = (List<String>) request.get("footerLines"); // <-- добавить
+
+        byte[] excel = officeExportService.exportExcel(title, columns, columnLabels, data, footerLines);
+        return ResponseEntity.ok()
+                .contentType(
+                        MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"stations.xlsx\"")
+                .body(excel);
+    }
+
+    @PostMapping("/crud/export-word")
+    public ResponseEntity<byte[]> exportWord(@RequestBody Map<String, Object> request) throws Exception {
+        String title = (String) request.get("title");
+        List<String> columns = (List<String>) request.get("columns");
+        List<String> columnLabels = (List<String>) request.get("columnLabels");
+        List<Map<String, Object>> data = (List<Map<String, Object>>) request.get("data");
+        List<String> footerLines = (List<String>) request.get("footerLines"); // <-- добавить
+
+        byte[] word = officeExportService.exportWord(title, columns, columnLabels, data, footerLines);
+        return ResponseEntity.ok()
+                .contentType(MediaType
+                        .parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"stations.docx\"")
+                .body(word);
     }
 
     // ==================== История изменений ====================
