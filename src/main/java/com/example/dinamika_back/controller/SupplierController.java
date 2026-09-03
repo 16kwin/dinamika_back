@@ -1,3 +1,4 @@
+// SupplierController.java — ПОЛНЫЙ ФАЙЛ (добавлен renameDocument)
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
@@ -72,6 +73,13 @@ public class SupplierController {
             @RequestParam("documentName") String documentName, @RequestParam("file") MultipartFile file) {
         try { return ResponseEntity.ok(supplierService.uploadDocument(supplierUid, documentName, file)); }
         catch (IOException e) { return ResponseEntity.internalServerError().build(); }
+    }
+
+    @PatchMapping("/documents/{uid}/rename")
+    public ResponseEntity<SupplierDocumentDTO> renameDocument(
+            @PathVariable UUID uid,
+            @RequestParam("documentName") String documentName) {
+        return ResponseEntity.ok(supplierService.renameDocument(uid, documentName));
     }
 
     @DeleteMapping("/documents/{uid}")
