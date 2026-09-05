@@ -1,15 +1,17 @@
-// StationConfigurationController.java — ПОЛНЫЙ ФАЙЛ (с getAllWithSettings)
+// StationConfigurationController.java — ПОЛНЫЙ ФАЙЛ (добавлены export-excel и export-word)
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
 import com.example.dinamika_back.service.StationConfigurationService;
 import com.example.dinamika_back.service.PdfExportService;
+import com.example.dinamika_back.service.OfficeExportService;
 import com.example.dinamika_back.service.StationConfigurationColumnSettingsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.*;
 
 @RestController
@@ -20,6 +22,7 @@ public class StationConfigurationController {
     private final StationConfigurationService configurationService;
     private final StationConfigurationColumnSettingsService columnSettingsService;
     private final PdfExportService pdfExportService;
+    private final OfficeExportService officeExportService; // <-- добавлено
 
     // ==================== CRUD ====================
 
@@ -132,7 +135,7 @@ public class StationConfigurationController {
         return ResponseEntity.ok().build();
     }
 
-    // ==================== ПДФ и ПЕЧАТЬ ====================
+    // ==================== ПДФ, ПЕЧАТЬ, EXCEL, WORD ====================
 
     @PostMapping("/export-pdf")
     public ResponseEntity<byte[]> exportPdf(@RequestBody Map<String, Object> request) throws Exception {
@@ -158,6 +161,38 @@ public class StationConfigurationController {
 
         byte[] pdf = pdfExportService.generatePdf(title, columns, columnLabels, data, landscape, footerLines);
         return buildPdfResponse(pdf, "print.pdf", true);
+    }
+
+    @PostMapping("/export-excel")
+    public ResponseEntity<byte[]> exportExcel(@RequestBody Map<String, Object> request) throws Exception {
+        String title = (String) request.get("title");
+        List<String> columns = (List<String>) request.get("columns");
+        List<String> columnLabels = (List<String>) request.get("columnLabels");
+        List<Map<String, Object>> data = (List<Map<String, Object>>) request.get("data");
+        List<String> footerLines = (List<String>) request.get("footerLines");
+
+        byte[] excel = officeExportService.exportExcel(title, columns, columnLabels, data, footerLines);
+        return ResponseEntity.ok()
+                .contentType(
+                        MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"configurations.xlsx\"")
+                .body(excel);
+    }
+
+    @PostMapping("/export-word")
+    public ResponseEntity<byte[]> exportWord(@RequestBody Map<String, Object> request) throws Exception {
+        String title = (String) request.get("title");
+        List<String> columns = (List<String>) request.get("columns");
+        List<String> columnLabels = (List<String>) request.get("columnLabels");
+        List<Map<String, Object>> data = (List<Map<String, Object>>) request.get("data");
+        List<String> footerLines = (List<String>) request.get("footerLines");
+
+        byte[] word = officeExportService.exportWord(title, columns, columnLabels, data, footerLines);
+        return ResponseEntity.ok()
+                .contentType(MediaType
+                        .parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"configurations.docx\"")
+                .body(word);
     }
 
     private ResponseEntity<byte[]> buildPdfResponse(byte[] pdf, String filename, boolean inline) {
