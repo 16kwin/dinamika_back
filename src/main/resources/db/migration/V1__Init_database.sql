@@ -621,7 +621,7 @@ CREATE TABLE IF NOT EXISTS spr_material_blueprints (
 CREATE TABLE IF NOT EXISTS spr_material_codes (
     uid UUID PRIMARY KEY,
     material_uid UUID NOT NULL REFERENCES spr_material(uid) ON DELETE CASCADE,
-    file_path TEXT NOT NULL,
+    file_path TEXT,
     original_name TEXT,
     code_type VARCHAR(20) DEFAULT 'QR_CODE',
     code_value TEXT,
