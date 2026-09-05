@@ -1,4 +1,3 @@
-// NomenclatureService.java — ПОЛНЫЙ ФАЙЛ (исправлен uploadCode — без сохранения файла)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -48,6 +47,7 @@ public class NomenclatureService {
     private final RegIntegrationRepository regIntegrationRepository;
     private final RegEventLogRepository eventLogRepository;
     private final NomenclatureColumnSettingsService columnSettingsService;
+    private final UserCodeDefaultRepository userCodeDefaultRepository;
 
     private static final String NOMENCLATURE_UPLOAD_DIR = "uploads/nomenclature/";
     private static final ObjectMapper objectMapper = new ObjectMapper();
@@ -63,6 +63,33 @@ public class NomenclatureService {
             "name", "code", "article", "typeMainName", "typePurposeName", "typeProductName",
             "barcode", "sku", "rating"
     ));
+
+    // ==================== ТИП КОДА ПО УМОЛЧАНИЮ ====================
+
+    public String getDefaultCodeType(Integer userId, String codeKind) {
+        return userCodeDefaultRepository.findByUserIdAndCodeKind(userId, codeKind)
+                .map(UserCodeDefault::getCodeType)
+                .orElse(null);
+    }
+
+    @Transactional
+    public void saveDefaultCodeType(SaveCodeDefaultRequest request) {
+        UserCodeDefault existing = userCodeDefaultRepository
+                .findByUserIdAndCodeKind(request.getUserId(), request.getCodeKind())
+                .orElse(null);
+
+        if (existing != null) {
+            existing.setCodeType(request.getCodeType());
+            userCodeDefaultRepository.save(existing);
+        } else {
+            UserCodeDefault newDefault = UserCodeDefault.builder()
+                    .userId(request.getUserId())
+                    .codeKind(request.getCodeKind())
+                    .codeType(request.getCodeType())
+                    .build();
+            userCodeDefaultRepository.save(newDefault);
+        }
+    }
 
     // ==================== ПОЛУЧЕНИЕ ДЕРЕВА С НАСТРОЙКАМИ ====================
 
@@ -1597,7 +1624,8 @@ public class NomenclatureService {
         code.setCodeType(codeType != null ? codeType : "QR_CODE");
         code.setCodeValue(codeValue);
         code.setCodeKind(codeKind != null ? codeKind : "QR");
-        // Файл не сохраняем
+        code.setFilePath("");
+        code.setOriginalName("");
         code.setCreatedAt(LocalDateTime.now());
         codeRepository.save(code);
         String codeLabel = "BARCODE".equals(codeKind) ? "Штрих-код" : "SKU".equals(codeKind) ? "SKU" : "QR-код";

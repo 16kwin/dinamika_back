@@ -1,4 +1,3 @@
-// NomenclatureController.java — ПОЛНЫЙ ФАЙЛ (с tree-with-settings)
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
@@ -22,6 +21,22 @@ public class NomenclatureController {
 
     private final NomenclatureService nomenclatureService;
     private final NomenclatureColumnSettingsService columnSettingsService;
+
+    // ==================== ТИП КОДА ПО УМОЛЧАНИЮ ====================
+
+    @GetMapping("/code-default")
+    public ResponseEntity<String> getDefaultCodeType(
+            @RequestParam Integer userId,
+            @RequestParam String codeKind) {
+        String codeType = nomenclatureService.getDefaultCodeType(userId, codeKind);
+        return ResponseEntity.ok(codeType != null ? codeType : "");
+    }
+
+    @PostMapping("/code-default")
+    public ResponseEntity<Void> saveDefaultCodeType(@RequestBody SaveCodeDefaultRequest request) {
+        nomenclatureService.saveDefaultCodeType(request);
+        return ResponseEntity.ok().build();
+    }
 
     // ==================== ДЕРЕВО С НАСТРОЙКАМИ ====================
 
