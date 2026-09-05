@@ -1,4 +1,4 @@
-// NomenclatureService.java — ПОЛНЫЙ ФАЙЛ (с заполнением barcode, sku, rating, lastPrice)
+// NomenclatureService.java — ПОЛНЫЙ ФАЙЛ (исправлен uploadCode — без сохранения файла)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -606,7 +606,6 @@ public class NomenclatureService {
                     item.setTypePurposeName(m.getTypePurpose() != null ? m.getTypePurpose().getTypeName() : null);
                     item.setTypeProductName(m.getTypeProduct() != null ? m.getTypeProduct().getTypeName() : null);
                     
-                    // Заполняем barcode и sku из spr_material_codes
                     List<SprMaterialCode> codes = codeRepository.findByMaterialUidOrderByCreatedAtDesc(m.getUid());
                     
                     String barcode = codes.stream()
@@ -624,7 +623,6 @@ public class NomenclatureService {
                     item.setBarcode(barcode);
                     item.setSku(sku);
                     
-                    // Дополнительные поля
                     item.setDescription(m.getDescription());
                     item.setUsage(m.getUsage());
                     item.setWasteMaterial(m.getWasteMaterial());
@@ -634,11 +632,9 @@ public class NomenclatureService {
                     item.setBrandName(m.getBrand() != null ? m.getBrand().getName() : null);
                     item.setModelName(m.getModelOfBrand() != null ? m.getModelOfBrand().getName() : null);
                     
-                    // Рейтинг (средний)
                     Double avgRating = regRatingRepository.getAverageRatingByMaterialUid(m.getUid());
                     item.setRating(avgRating != null ? avgRating.intValue() : null);
                     
-                    // Последняя цена
                     List<RegPrice> prices = priceRepository.findByMaterialUidOrderByPriceDateDesc(m.getUid());
                     if (!prices.isEmpty()) {
                         item.setLastPrice(prices.get(0).getPrice());
@@ -1601,11 +1597,7 @@ public class NomenclatureService {
         code.setCodeType(codeType != null ? codeType : "QR_CODE");
         code.setCodeValue(codeValue);
         code.setCodeKind(codeKind != null ? codeKind : "QR");
-        if (file != null && !file.isEmpty()) {
-            String fileName = saveFile(materialUid, file);
-            code.setFilePath(fileName);
-            code.setOriginalName(file.getOriginalFilename());
-        }
+        // Файл не сохраняем
         code.setCreatedAt(LocalDateTime.now());
         codeRepository.save(code);
         String codeLabel = "BARCODE".equals(codeKind) ? "Штрих-код" : "SKU".equals(codeKind) ? "SKU" : "QR-код";
