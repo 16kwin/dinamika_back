@@ -1,4 +1,4 @@
-// StationCrudService.java — ПОЛНЫЙ ФАЙЛ (исправлен getAllEvents - фильтрация всех детальных событий)
+// StationCrudService.java — ПОЛНЫЙ ФАЙЛ (copy возвращает данные и документы)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -28,6 +28,7 @@ public class StationCrudService {
     private final StationColumnSettingsService columnSettingsService;
     private final StationEventLogRepository eventLogRepository;
     private final UserService userService;
+    private final StationDocumentRepository stationDocumentRepository;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -197,6 +198,79 @@ public class StationCrudService {
         logEvent(station.getUid(), "CREATE", "Создание станции: '" + station.getName() + "'", null, null, null, userService.getCurrentUsername());
 
         return toDTO(station);
+    }
+
+    // ==================== COPY (без сохранения) ====================
+
+    public StationDto copy(String uid) {
+        Station original = stationRepository.findByUid(uid)
+                .orElseThrow(() -> new RuntimeException("Станция не найдена: " + uid));
+
+        StationDto copyDto = new StationDto();
+        copyDto.setUid(java.util.UUID.randomUUID().toString());
+        copyDto.setCode(generateCode());
+        copyDto.setName(original.getName() + " (копия)");
+        copyDto.setDescription(original.getDescription());
+        copyDto.setProductionDate(original.getProductionDate());
+        copyDto.setSerialNumber(original.getSerialNumber());
+
+        copyDto.setHoldingId(original.getHolding() != null ? original.getHolding().getId() : null);
+        copyDto.setHoldingName(original.getHolding() != null ? original.getHolding().getName() : null);
+        copyDto.setEnterpriseId(original.getEnterprise() != null ? original.getEnterprise().getId() : null);
+        copyDto.setEnterpriseName(original.getEnterprise() != null ? original.getEnterprise().getName() : null);
+        copyDto.setWorkshopId(original.getWorkshop() != null ? original.getWorkshop().getId() : null);
+        copyDto.setWorkshopName(original.getWorkshop() != null ? original.getWorkshop().getName() : null);
+        copyDto.setSectionId(original.getSection() != null ? original.getSection().getId() : null);
+        copyDto.setSectionName(original.getSection() != null ? original.getSection().getName() : null);
+
+        copyDto.setStatus(original.getStatus() != null ? original.getStatus().name() : null);
+
+        if (original.getModel() != null) {
+            copyDto.setModelId(original.getModel().getUid().toString());
+            copyDto.setModelName(original.getModel().getName());
+            copyDto.setArticle(original.getModel().getArticle());
+            copyDto.setRevision(original.getModel().getRevision());
+            if (original.getModel().getType() != null) {
+                copyDto.setStationType(original.getModel().getType().getName());
+                copyDto.setStationTypeUid(original.getModel().getType().getUid().toString());
+            }
+        }
+
+        if (original.getConfiguration() != null) {
+            copyDto.setConfigurationUid(original.getConfiguration().getUid().toString());
+            copyDto.setConfigurationName(original.getConfiguration().getName());
+        }
+
+        copyDto.setParentUid(original.getParentUid());
+        copyDto.setIsAdditionalModule(original.getIsAdditionalModule());
+        copyDto.setHasAdditionalModule(original.getHasAdditionalModule());
+        copyDto.setHasError(original.getHasError());
+        copyDto.setIsTmc(original.getIsTmc());
+        copyDto.setIsSgd(original.getIsSgd());
+        copyDto.setIsOk(original.getIsOk());
+        copyDto.setIpAddress(original.getIpAddress());
+        copyDto.setNetworkPort(original.getNetworkPort());
+
+        if (original.getActiveTemplate() != null) {
+            copyDto.setActiveTemplateUid(original.getActiveTemplate().getUid().toString());
+            copyDto.setActiveTemplateName(original.getActiveTemplate().getNamePattern());
+        }
+
+        // Копируем документы (метаданные) для передачи на фронтенд
+        List<StationDocument> docs = stationDocumentRepository.findByStationUidOrderByCreatedAtDesc(original.getUid());
+        List<StationDocumentDto> docDtos = docs.stream()
+                .map(doc -> StationDocumentDto.builder()
+                        .uid(doc.getUid())
+                        .stationUid(doc.getStationUid())
+                        .documentName(doc.getDocumentName())
+                        .filePath(doc.getFilePath())
+                        .originalName(doc.getOriginalName())
+                        .createdAt(doc.getCreatedAt())
+                        .build())
+                .collect(Collectors.toList());
+        copyDto.setDocuments(docDtos);
+
+        return copyDto;
     }
 
     // ==================== UPDATE ====================
@@ -429,7 +503,8 @@ public class StationCrudService {
                         && !"STRUCTURE_CREATE".equals(e.getEventType())
                         && !"STRUCTURE_UPDATE".equals(e.getEventType())
                         && !"IMAGE_ADD".equals(e.getEventType())
-                        && !"IMAGE_DELETE".equals(e.getEventType()))
+                        && !"IMAGE_DELETE".equals(e.getEventType())
+                        && !"COPY".equals(e.getEventType()))
                 .map(this::toEventDTO)
                 .collect(Collectors.toList());
     }
