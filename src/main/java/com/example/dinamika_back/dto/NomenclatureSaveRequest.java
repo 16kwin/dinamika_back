@@ -16,6 +16,7 @@ public class NomenclatureSaveRequest {
     private UUID typeMainUid;
     private UUID typePurposeUid;
     private UUID typeProductUid;
+    private UUID releaseUid;
     private Boolean usage;
     private Boolean wasteMaterial;
     private Boolean recycleMaterial;

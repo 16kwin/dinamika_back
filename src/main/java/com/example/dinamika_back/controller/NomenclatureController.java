@@ -1,3 +1,4 @@
+// NomenclatureController.java — ПОЛНЫЙ ФАЙЛ (добавлены виды выпуска)
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
@@ -237,6 +238,13 @@ public class NomenclatureController {
     public ResponseEntity<Void> deleteTypeProduct(@PathVariable UUID uid) {
         nomenclatureService.deleteTypeProduct(uid);
         return ResponseEntity.ok().build();
+    }
+
+    // ==================== ВИДЫ ВЫПУСКА ====================
+
+    @GetMapping("/releases")
+    public ResponseEntity<List<SprReleaseDTO>> getReleases() {
+        return ResponseEntity.ok(nomenclatureService.getReleases());
     }
 
     // ==================== Виды характеристик ====================
