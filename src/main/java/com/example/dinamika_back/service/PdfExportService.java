@@ -31,7 +31,6 @@ public class PdfExportService {
             boolean landscape,
             List<String> footerLines) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        // ЯВНО УКАЗЫВАЕМ ПОЛНОЕ ИМЯ КЛАССА com.lowagie.text.Rectangle
         com.lowagie.text.Rectangle pageSize = landscape ? PageSize.A4.rotate() : PageSize.A4;
         Document document = new Document(pageSize, PAGE_MARGIN, PAGE_MARGIN, PAGE_MARGIN, PAGE_MARGIN);
         PdfWriter.getInstance(document, out);
@@ -84,8 +83,7 @@ public class PdfExportService {
             }
         }
 
-        // Для каждой колонки находим самое длинное слово (по ширине при опорном
-        // размере)
+        // Для каждой колонки находим самое длинное слово (по ширине при опорном размере)
         float[] maxWordWidths = new float[colCount];
         for (int i = 0; i < colCount; i++) {
             float maxW = 0;
@@ -105,7 +103,6 @@ public class PdfExportService {
             maxWordWidths[i] = maxW + EXTRA_PADDING;
         }
 
-        // Минимальная ширина колонки
         float MIN_COLUMN_WIDTH = 30f;
         for (int i = 0; i < colCount; i++) {
             if (maxWordWidths[i] < MIN_COLUMN_WIDTH) {
@@ -138,7 +135,6 @@ public class PdfExportService {
                 columnWeights[i] = 100f / colCount;
         }
 
-        // Нормализуем
         float sum = 0;
         for (float w : columnWeights)
             sum += w;
@@ -150,7 +146,6 @@ public class PdfExportService {
         table.setWidthPercentage(100);
         table.setWidths(columnWeights);
 
-        // Шрифт для всех ячеек
         Font cellFont = new Font(baseFont, fontSize, Font.NORMAL);
         Font headerFont = new Font(baseFont, fontSize, Font.BOLD, new Color(64, 64, 64));
 
@@ -161,7 +156,11 @@ public class PdfExportService {
             cell.setBackgroundColor(new Color(240, 240, 240));
             cell.setHorizontalAlignment(Element.ALIGN_CENTER);
             cell.setVerticalAlignment(Element.ALIGN_MIDDLE);
-            cell.setPadding(1f);
+            cell.setPadding(3f);                 // Увеличили отступы
+            cell.setMinimumHeight(16f);          // Минимальная высота
+            cell.setUseAscender(true);           // Учитывать верхние выноски
+            cell.setUseDescender(true);          // Учитывать нижние выноски
+            cell.setNoWrap(false);               // Явно разрешаем перенос
             table.addCell(cell);
         }
 
@@ -171,7 +170,11 @@ public class PdfExportService {
                 String text = cellTexts[rowIdx][i];
                 PdfPCell cell = new PdfPCell(new Paragraph(text, cellFont));
                 cell.setVerticalAlignment(Element.ALIGN_MIDDLE);
-                cell.setPadding(1f);
+                cell.setPadding(3f);
+                cell.setMinimumHeight(14f);
+                cell.setUseAscender(true);
+                cell.setUseDescender(true);
+                cell.setNoWrap(false);
                 table.addCell(cell);
             }
         }
