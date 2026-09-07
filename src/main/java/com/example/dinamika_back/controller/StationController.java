@@ -1,4 +1,4 @@
-// StationController.java — ПОЛНЫЙ ФАЙЛ (добавлены эндпоинты для печати и PDF)
+// StationController.java — ПОЛНЫЙ ФАЙЛ (добавлен эндпоинт copy)
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
@@ -129,6 +129,11 @@ public class StationController {
         return ResponseEntity.ok(stationCrudService.create(request));
     }
 
+    @PostMapping("/crud/{uid}/copy")
+    public ResponseEntity<StationDto> copy(@PathVariable String uid) {
+        return ResponseEntity.ok(stationCrudService.copy(uid));
+    }
+
     @PatchMapping("/crud/{uid}")
     public ResponseEntity<StationDto> update(@PathVariable String uid, @RequestBody UpdateStationRequest request) {
         return ResponseEntity.ok(stationCrudService.update(uid, request));
@@ -184,7 +189,7 @@ public class StationController {
         List<String> columns = (List<String>) request.get("columns");
         List<String> columnLabels = (List<String>) request.get("columnLabels");
         List<Map<String, Object>> data = (List<Map<String, Object>>) request.get("data");
-        List<String> footerLines = (List<String>) request.get("footerLines"); // <-- добавить
+        List<String> footerLines = (List<String>) request.get("footerLines");
 
         byte[] excel = officeExportService.exportExcel(title, columns, columnLabels, data, footerLines);
         return ResponseEntity.ok()
@@ -200,7 +205,7 @@ public class StationController {
         List<String> columns = (List<String>) request.get("columns");
         List<String> columnLabels = (List<String>) request.get("columnLabels");
         List<Map<String, Object>> data = (List<Map<String, Object>>) request.get("data");
-        List<String> footerLines = (List<String>) request.get("footerLines"); // <-- добавить
+        List<String> footerLines = (List<String>) request.get("footerLines");
 
         byte[] word = officeExportService.exportWord(title, columns, columnLabels, data, footerLines);
         return ResponseEntity.ok()
@@ -222,8 +227,7 @@ public class StationController {
         return ResponseEntity.ok(stationCrudService.getEvents(uid));
     }
 
-    // ==================== Настройки колонок, фильтров, сортировки
-    // ====================
+    // ==================== Настройки колонок, фильтров, сортировки ====================
 
     @GetMapping("/settings")
     public ResponseEntity<Map<String, String>> getAllSettings(@RequestParam Integer userId) {

@@ -1,4 +1,4 @@
-// StationDto.java — обновлённый конструктор
+// StationDto.java — добавлено поле documents
 package com.example.dinamika_back.dto;
 
 import lombok.AllArgsConstructor;
@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @Getter
 @Setter
@@ -63,4 +64,7 @@ public class StationDto {
     // Шаблон
     private String activeTemplateUid;
     private String activeTemplateName;
+    
+    // Документы (для копирования)
+    private List<StationDocumentDto> documents;
 }

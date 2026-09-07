@@ -1,4 +1,4 @@
-// NomenclatureService.java — ПОЛНЫЙ ФАЙЛ (исправлен uploadCode — без сохранения файла)
+// NomenclatureService.java — ПОЛНЫЙ ФАЙЛ (добавлены виды выпуска)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -28,6 +28,7 @@ public class NomenclatureService {
     private final SprTypeMaterialRepository typeMaterialRepository;
     private final SprTypePurposeRepository typePurposeRepository;
     private final SprTypeProductRepository typeProductRepository;
+    private final SprReleaseRepository releaseRepository;
     private final SprMeasureRepository measureRepository;
     private final SprManufacturerRepository manufacturerRepository;
     private final SprBrandRepository brandRepository;
@@ -48,6 +49,7 @@ public class NomenclatureService {
     private final RegIntegrationRepository regIntegrationRepository;
     private final RegEventLogRepository eventLogRepository;
     private final NomenclatureColumnSettingsService columnSettingsService;
+    private final UserCodeDefaultRepository userCodeDefaultRepository;
 
     private static final String NOMENCLATURE_UPLOAD_DIR = "uploads/nomenclature/";
     private static final ObjectMapper objectMapper = new ObjectMapper();
@@ -63,6 +65,33 @@ public class NomenclatureService {
             "name", "code", "article", "typeMainName", "typePurposeName", "typeProductName",
             "barcode", "sku", "rating"
     ));
+
+    // ==================== ТИП КОДА ПО УМОЛЧАНИЮ ====================
+
+    public String getDefaultCodeType(Integer userId, String codeKind) {
+        return userCodeDefaultRepository.findByUserIdAndCodeKind(userId, codeKind)
+                .map(UserCodeDefault::getCodeType)
+                .orElse(null);
+    }
+
+    @Transactional
+    public void saveDefaultCodeType(SaveCodeDefaultRequest request) {
+        UserCodeDefault existing = userCodeDefaultRepository
+                .findByUserIdAndCodeKind(request.getUserId(), request.getCodeKind())
+                .orElse(null);
+
+        if (existing != null) {
+            existing.setCodeType(request.getCodeType());
+            userCodeDefaultRepository.save(existing);
+        } else {
+            UserCodeDefault newDefault = UserCodeDefault.builder()
+                    .userId(request.getUserId())
+                    .codeKind(request.getCodeKind())
+                    .codeType(request.getCodeType())
+                    .build();
+            userCodeDefaultRepository.save(newDefault);
+        }
+    }
 
     // ==================== ПОЛУЧЕНИЕ ДЕРЕВА С НАСТРОЙКАМИ ====================
 
@@ -282,6 +311,10 @@ public class NomenclatureService {
             dto.setTypeProductUid(material.getTypeProduct().getUid());
             dto.setTypeProductName(material.getTypeProduct().getTypeName());
         }
+        if (material.getRelease() != null) {
+            dto.setReleaseUid(material.getRelease().getUid());
+            dto.setReleaseName(material.getRelease().getName());
+        }
         if (material.getMeasure() != null) {
             dto.setMeasureUid(material.getMeasure().getUid());
             dto.setMeasureName(material.getMeasure().getName());
@@ -373,6 +406,9 @@ public class NomenclatureService {
         }
         if (request.getTypeProductUid() != null) {
             material.setTypeProduct(typeProductRepository.findById(request.getTypeProductUid()).orElse(null));
+        }
+        if (request.getReleaseUid() != null) {
+            material.setRelease(releaseRepository.findById(request.getReleaseUid()).orElse(null));
         }
         if (request.getMeasureUid() != null) {
             material.setMeasure(measureRepository.findById(request.getMeasureUid()).orElse(null));
@@ -777,6 +813,7 @@ public class NomenclatureService {
         copy.setBrand(source.getBrand());
         copy.setModelOfBrand(source.getModelOfBrand());
         copy.setCountry(source.getCountry());
+        copy.setRelease(source.getRelease());
 
         if (targetGroupUid != null) {
             RegGroupMaterial group = groupMaterialRepository.findById(targetGroupUid).orElse(null);
@@ -921,6 +958,14 @@ public class NomenclatureService {
                 p.getTypePurpose() != null ? p.getTypePurpose().getUid() : null,
                 p.getTypePurpose() != null ? p.getTypePurpose().getTypeName() : null,
                 p.getTypePurpose() != null && p.getTypePurpose().getTypeMaterial() != null ? p.getTypePurpose().getTypeMaterial().getTypeName() : null);
+    }
+
+    // ==================== ВИДЫ ВЫПУСКА ====================
+
+    public List<SprReleaseDTO> getReleases() {
+        return releaseRepository.findAll().stream()
+                .map(r -> new SprReleaseDTO(r.getUid(), r.getName()))
+                .collect(Collectors.toList());
     }
 
     public List<SprMeasureDTO> getMeasures() {
@@ -1597,7 +1642,8 @@ public class NomenclatureService {
         code.setCodeType(codeType != null ? codeType : "QR_CODE");
         code.setCodeValue(codeValue);
         code.setCodeKind(codeKind != null ? codeKind : "QR");
-        // Файл не сохраняем
+        code.setFilePath("");
+        code.setOriginalName("");
         code.setCreatedAt(LocalDateTime.now());
         codeRepository.save(code);
         String codeLabel = "BARCODE".equals(codeKind) ? "Штрих-код" : "SKU".equals(codeKind) ? "SKU" : "QR-код";
