@@ -18,7 +18,7 @@ import java.util.Map;
 public class PdfExportService {
 
     private static final float MAX_FONT_SIZE = 9f;
-    private static final float MIN_FONT_SIZE = 5f;
+    private static final float MIN_FONT_SIZE = 4f;
     private static final float PAGE_MARGIN = 20f;
     private static final float PAGE_WIDTH_PORTRAIT = 595f - 2 * PAGE_MARGIN;
     private static final float PAGE_WIDTH_LANDSCAPE = 842f - 2 * PAGE_MARGIN;

@@ -156,8 +156,7 @@ public class CountryCrudController {
 
         byte[] excel = officeExportService.exportExcel(title, columns, columnLabels, data, footerLines);
         return ResponseEntity.ok()
-                .contentType(
-                        MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"countries.xlsx\"")
                 .body(excel);
     }
@@ -172,8 +171,7 @@ public class CountryCrudController {
 
         byte[] word = officeExportService.exportWord(title, columns, columnLabels, data, footerLines);
         return ResponseEntity.ok()
-                .contentType(MediaType
-                        .parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"countries.docx\"")
                 .body(word);
     }
