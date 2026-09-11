@@ -16,8 +16,8 @@ import java.util.Map;
 public class OfficeExportService {
 
     private static final float MAX_FONT_SIZE = 9f;
-    private static final float MIN_FONT_SIZE = 5f;
-    private static final int MIN_CHAR_LENGTH = 4;
+    private static final float MIN_FONT_SIZE = 4f;
+    private static final int MIN_CHAR_LENGTH = 6;
     private static final float WORD_PAGE_WIDTH = 550f;
 
     // ==================== Excel ====================
