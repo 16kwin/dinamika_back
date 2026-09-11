@@ -8,4 +8,5 @@ import java.util.UUID;
 public class TemplateCopyRequest {
     private UUID sourceTemplateUid;
     private Long targetCategoryId;
+    private String name;
 }

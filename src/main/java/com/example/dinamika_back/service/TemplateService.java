@@ -1,4 +1,4 @@
-// TemplateService.java — ПОЛНЫЙ ФАЙЛ
+// TemplateService.java — ПОЛНЫЙ ФАЙЛ (copyTemplate проставляет createdAt/updatedAt)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -93,6 +94,8 @@ public class TemplateService {
         template.setNamePattern(request.getName());
         template.setNumber(nextNumber);
         template.setConfiguration(request.getConfiguration() != null ? request.getConfiguration() : "");
+        template.setCreatedAt(LocalDateTime.now());
+        template.setUpdatedAt(LocalDateTime.now());
 
         if (request.getConfigurationUid() != null) {
             StationConfiguration config = configurationRepository.findById(request.getConfigurationUid())
@@ -149,13 +152,19 @@ public class TemplateService {
                 .orElseThrow(() -> new RuntimeException("Исходный шаблон не найден: " + request.getSourceTemplateUid()));
 
         Long nextNumber = docPatternRepository.findMaxNumber() + 1;
+        LocalDateTime now = LocalDateTime.now();
 
         DocPattern copy = new DocPattern();
         copy.setUid(UUID.randomUUID());
-        copy.setNamePattern(source.getNamePattern() + " (копия)");
+        copy.setNamePattern(
+                request.getName() != null && !request.getName().isBlank()
+                        ? request.getName()
+                        : source.getNamePattern() + " (копия)");
         copy.setNumber(nextNumber);
         copy.setConfiguration(source.getConfiguration());
         copy.setStationConfiguration(source.getStationConfiguration());
+        copy.setCreatedAt(now);
+        copy.setUpdatedAt(now);
 
         Long targetCategoryId = request.getTargetCategoryId() != null
                 ? request.getTargetCategoryId()
@@ -172,7 +181,69 @@ public class TemplateService {
         copy.setFreeCells(source.getTotalCells());
 
         docPatternRepository.save(copy);
+
+        // === Копирование ячеек источника ===
+        List<RegCells> sourceCells = regCellsRepository.findByDocPatternUid(source.getUid());
+        for (RegCells src : sourceCells) {
+            RegCells newCell = new RegCells();
+            newCell.setUid(UUID.randomUUID());
+            newCell.setDocPattern(copy);
+            newCell.setNumberCell(src.getNumberCell());
+            newCell.setColumnNumber(src.getColumnNumber());
+            newCell.setDrumNumber(src.getDrumNumber());
+            newCell.setMaterial(src.getMaterial());
+            newCell.setQuantity(src.getQuantity());
+            newCell.setTypeMain(src.getTypeMain());
+            newCell.setPurposeMaterial(src.getPurposeMaterial());
+            newCell.setPurposeSgd(src.getPurposeSgd());
+            newCell.setMaxQuantity(src.getMaxQuantity());
+            newCell.setDimensions(src.getDimensions());
+            regCellsRepository.save(newCell);
+        }
+
+        recalcTemplateStats(copy);
         return toTemplateDto(copy);
+    }
+
+    // ==================== БАТЧ ЯЧЕЕК ====================
+
+    @Transactional
+    public void saveBatchCells(UUID templateUid, SaveBatchCellsRequest request) {
+        DocPattern template = docPatternRepository.findById(templateUid)
+                .orElseThrow(() -> new RuntimeException("Шаблон не найден: " + templateUid));
+
+        regCellsRepository.deleteByDocPatternUid(templateUid);
+
+        if (request.getCells() != null) {
+            for (SaveBatchCellsRequest.BatchCellItem item : request.getCells()) {
+                RegCells cell = new RegCells();
+                cell.setUid(UUID.randomUUID());
+                cell.setDocPattern(template);
+                cell.setNumberCell(item.getNumberCell());
+                cell.setColumnNumber(item.getColumnNumber());
+                cell.setDrumNumber(item.getDrumNumber());
+                cell.setQuantity(item.getQuantity());
+                cell.setPurposeMaterial(item.getPurposeMaterial());
+                cell.setPurposeSgd(item.getPurposeSgd());
+                cell.setMaxQuantity(item.getMaxQuantity());
+                cell.setDimensions(item.getDimensions());
+
+                if (item.getMaterialUid() != null) {
+                    SprMaterial material = materialRepository.findById(item.getMaterialUid())
+                            .orElseThrow(() -> new RuntimeException("Материал не найден: " + item.getMaterialUid()));
+                    cell.setMaterial(material);
+                }
+                if (item.getTypeMainUid() != null) {
+                    SprTypeMaterial typeMain = typeMaterialRepository.findById(item.getTypeMainUid())
+                            .orElseThrow(() -> new RuntimeException("Тип материала не найден: " + item.getTypeMainUid()));
+                    cell.setTypeMain(typeMain);
+                }
+
+                regCellsRepository.save(cell);
+            }
+        }
+
+        recalcTemplateStats(template);
     }
 
     // ==================== СТАНЦИИ ШАБЛОНА ====================
