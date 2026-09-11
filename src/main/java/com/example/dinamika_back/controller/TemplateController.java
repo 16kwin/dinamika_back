@@ -1,4 +1,4 @@
-// TemplateController.java — ПОЛНЫЙ ФАЙЛ (добавлены эндпоинты экспорта)
+// TemplateController.java — ПОЛНЫЙ ФАЙЛ (добавлен batch-save ячеек)
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
@@ -121,6 +121,13 @@ public class TemplateController {
     @PostMapping("/cells/clear-batch")
     public ResponseEntity<Void> clearBatchCells(@RequestBody ClearBatchRequest request) {
         templateService.clearBatchCells(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/{uid}/cells/batch-save")
+    public ResponseEntity<Void> saveBatchCells(@PathVariable UUID uid,
+                                               @RequestBody SaveBatchCellsRequest request) {
+        templateService.saveBatchCells(uid, request);
         return ResponseEntity.noContent().build();
     }
 
