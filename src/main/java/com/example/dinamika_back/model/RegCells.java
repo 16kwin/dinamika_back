@@ -1,4 +1,4 @@
-// RegCells.java — добавить поля
+// RegCells.java — ПОЛНЫЙ ФАЙЛ (новая структура)
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
@@ -34,27 +34,21 @@ public class RegCells {
     private Integer drumNumber;
 
     @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "cell_assignment_uid")
+    private SprCellAssignment cellAssignment;
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "name_material")
     private SprMaterial material;
 
     @Column(name = "quantity")
     private Integer quantity;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "type_main")
-    private SprTypeMaterial typeMain;
+    @Column(name = "return_to_this_cell", nullable = false)
+    private Boolean returnToThisCell = false;
 
-    @Column(name = "purpose_material")
-    private String purposeMaterial;
-
-    @Column(name = "purpose_sgd")
-    private String purposeSgd;
-
-    @Column(name = "max_quantity")
-    private Integer maxQuantity;
-
-    @Column(name = "dimensions")
-    private String dimensions;
+    @Column(name = "is_individual", nullable = false)
+    private Boolean isIndividual = false;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
@@ -76,8 +70,8 @@ public class RegCells {
     public void clear() {
         this.material = null;
         this.quantity = null;
-        this.typeMain = null;
-        this.purposeMaterial = null;
-        this.purposeSgd = null;
+        this.cellAssignment = null;
+        this.returnToThisCell = false;
+        this.isIndividual = false;
     }
 }

@@ -1,5 +1,6 @@
 -- V1__Init_database.sql
--- Единая миграция (объединение V1-V20 + все сиды)
+-- Единая миграция (объединение V1-V3 + V5)
+-- Переработано: spr_cell_assignment + новая структура reg_cells + spr_release + user_code_defaults + иерархия категорий + user_template_column_settings
 
 BEGIN;
 
@@ -31,6 +32,16 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
     expires_at TIMESTAMP,
     is_actual BOOLEAN
 );
+
+CREATE TABLE IF NOT EXISTS user_code_defaults (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_kind VARCHAR(20) NOT NULL,
+    code_type VARCHAR(20) NOT NULL,
+    UNIQUE(user_id, code_kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_code_defaults_user ON user_code_defaults(user_id);
 
 -- ============================================================
 -- 2. СПРАВОЧНИКИ (БАЗОВЫЕ)
@@ -72,11 +83,26 @@ CREATE TABLE IF NOT EXISTS spr_type_product (
     type_purpose_uid UUID REFERENCES spr_type_purpose(uid) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS spr_release (
+    uid UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE
+);
+
 CREATE TABLE IF NOT EXISTS reg_group_material (
     uid UUID PRIMARY KEY,
     group_name TEXT NOT NULL,
     parent_group UUID REFERENCES reg_group_material(uid) ON DELETE SET NULL,
     group_code INTEGER
+);
+
+-- ============================================================
+-- 2.1. НАЗНАЧЕНИЯ ЯЧЕЕК (справочник)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS spr_cell_assignment (
+    uid UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL UNIQUE,
+    type_uid UUID REFERENCES spr_type_material(uid) ON DELETE SET NULL
 );
 
 -- ============================================================
@@ -381,9 +407,13 @@ CREATE TABLE IF NOT EXISTS template_categories (
     id BIGSERIAL PRIMARY KEY,
     uid UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL UNIQUE,
+    parent_category_id BIGINT REFERENCES template_categories(id) ON DELETE CASCADE,
+    code INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_template_categories_parent ON template_categories(parent_category_id);
 
 CREATE TABLE IF NOT EXISTS doc_pattern (
     uid UUID PRIMARY KEY,
@@ -480,6 +510,7 @@ CREATE TABLE IF NOT EXISTS spr_material (
     brand UUID REFERENCES spr_brand(uid) ON DELETE SET NULL,
     model_of_brand UUID REFERENCES spr_model_of_brand(uid) ON DELETE SET NULL,
     measure UUID REFERENCES spr_measure(uid) ON DELETE SET NULL,
+    release_uid UUID REFERENCES spr_release(uid) ON DELETE SET NULL,
     name_material TEXT,
     article TEXT,
     description TEXT,
@@ -639,25 +670,27 @@ CREATE TABLE IF NOT EXISTS spr_material_documents (
 );
 
 -- ============================================================
--- 13. ЯЧЕЙКИ ШАБЛОНОВ
+-- 13. ЯЧЕЙКИ ШАБЛОНОВ (ПЕРЕРАБОТАНО)
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS reg_cells (
-    uid UUID PRIMARY KEY,
-    doc_pattern_uid UUID REFERENCES doc_pattern(uid) ON DELETE SET NULL,
+    uid UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    doc_pattern_uid UUID REFERENCES doc_pattern(uid) ON DELETE CASCADE,
     number_cell INTEGER,
     column_number INTEGER,
     drum_number INTEGER,
+    cell_assignment_uid UUID REFERENCES spr_cell_assignment(uid) ON DELETE SET NULL,
     name_material UUID REFERENCES spr_material(uid) ON DELETE SET NULL,
     quantity INTEGER,
-    type_main UUID REFERENCES spr_type_material(uid) ON DELETE SET NULL,
-    purpose_material TEXT,
-    purpose_sgd TEXT,
-    max_quantity INTEGER,
-    dimensions TEXT,
+    return_to_this_cell BOOLEAN NOT NULL DEFAULT FALSE,
+    is_individual BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_reg_cells_pattern ON reg_cells(doc_pattern_uid);
+CREATE INDEX IF NOT EXISTS idx_reg_cells_address ON reg_cells(doc_pattern_uid, drum_number, column_number, number_cell);
+CREATE INDEX IF NOT EXISTS idx_reg_cells_assignment ON reg_cells(cell_assignment_uid);
 
 -- ============================================================
 -- 14. ЗАКАЗЫ AWMS
@@ -872,6 +905,18 @@ CREATE TABLE IF NOT EXISTS user_station_configuration_column_settings (
 );
 
 CREATE TABLE IF NOT EXISTS user_nomenclature_column_settings (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    columns_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    filters_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    sort_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    current_path_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_template_column_settings (
     id BIGSERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     columns_json JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -1399,6 +1444,7 @@ CREATE INDEX IF NOT EXISTS idx_awms_tkp_statuses_tkp_uid ON awms_tkp_statuses(tk
 CREATE INDEX IF NOT EXISTS idx_awms_tkp_statuses_order_uid ON awms_tkp_statuses(order_uid);
 
 CREATE INDEX IF NOT EXISTS idx_user_nomenclature_settings_user ON user_nomenclature_column_settings(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_template_settings_user ON user_template_column_settings(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_type_material_settings_user ON user_type_material_column_settings(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_type_purpose_settings_user ON user_type_purpose_column_settings(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_type_product_settings_user ON user_type_product_column_settings(user_id);
@@ -1447,7 +1493,43 @@ INSERT INTO spr_country (uid, name) VALUES
 ON CONFLICT DO NOTHING;
 
 -- ============================================================
--- 21. СИДЫ: ЕДИНИЦЫ ИЗМЕРЕНИЯ
+-- 21. СИДЫ: ГРУППЫ УЧЕТА
+-- ============================================================
+
+INSERT INTO spr_type_material (uid, type_name) VALUES
+    (gen_random_uuid(), 'ТМЦ'),
+    (gen_random_uuid(), 'Готовая деталь')
+ON CONFLICT DO NOTHING;
+
+-- ============================================================
+-- 21.1. СИДЫ: НАЗНАЧЕНИЯ ЯЧЕЕК
+-- ============================================================
+
+INSERT INTO spr_cell_assignment (uid, name, type_uid)
+SELECT gen_random_uuid(), v.name, (SELECT uid FROM spr_type_material WHERE type_name = v.type_name)
+FROM (VALUES
+    ('ТМЦ', 'ТМЦ'),
+    ('Возврат брака ТМЦ', 'ТМЦ'),
+    ('Инструмент на переточку', 'ТМЦ'),
+    ('Лом', 'ТМЦ'),
+    ('Готовая деталь (с производства)', 'Готовая деталь'),
+    ('Готовая деталь (контроль качества пройден)', 'Готовая деталь'),
+    ('Готовая деталь (контроль качества не пройден)', 'Готовая деталь')
+) AS v(name, type_name)
+ON CONFLICT (name) DO NOTHING;
+
+-- ============================================================
+-- 21.2. СИДЫ: ВИДЫ ВЫПУСКА
+-- ============================================================
+
+INSERT INTO spr_release (uid, name) VALUES
+    (gen_random_uuid(), 'Полуфабрикат'),
+    (gen_random_uuid(), 'Деталь'),
+    (gen_random_uuid(), 'Продукция (товарное изделие)')
+ON CONFLICT (name) DO NOTHING;
+
+-- ============================================================
+-- 22. СИДЫ: ЕДИНИЦЫ ИЗМЕРЕНИЯ
 -- ============================================================
 
 INSERT INTO spr_measure (uid, name, description) VALUES
@@ -1462,7 +1544,7 @@ INSERT INTO spr_measure (uid, name, description) VALUES
 ON CONFLICT DO NOTHING;
 
 -- ============================================================
--- 22. СИДЫ: ГРУППЫ ХАРАКТЕРИСТИК
+-- 23. СИДЫ: ГРУППЫ ХАРАКТЕРИСТИК
 -- ============================================================
 
 INSERT INTO spr_attribute_group (uid, name) VALUES
@@ -1476,7 +1558,7 @@ UPDATE spr_measure SET group_uid = (SELECT uid FROM spr_attribute_group WHERE na
 UPDATE spr_measure SET group_uid = (SELECT uid FROM spr_attribute_group WHERE name = 'Эксплуатационные') WHERE name IN ('шт', 'компл', 'град');
 
 -- ============================================================
--- 23. СИДЫ: ЕДИНИЦЫ ИЗМЕРЕНИЯ (НОМЕНКЛАТУРА)
+-- 24. СИДЫ: ЕДИНИЦЫ ИЗМЕРЕНИЯ (НОМЕНКЛАТУРА)
 -- ============================================================
 
 INSERT INTO spr_unit (uid, name, description) VALUES
@@ -1486,7 +1568,7 @@ INSERT INTO spr_unit (uid, name, description) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 -- ============================================================
--- 24. СИДЫ: НАПРАВЛЕНИЯ ПРОИЗВОДСТВА
+-- 25. СИДЫ: НАПРАВЛЕНИЯ ПРОИЗВОДСТВА
 -- ============================================================
 
 INSERT INTO spr_production_direction (uid, name) VALUES
@@ -1498,7 +1580,7 @@ INSERT INTO spr_production_direction (uid, name) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 -- ============================================================
--- 25. СИДЫ: РАСПОЛОЖЕНИЯ
+-- 26. СИДЫ: РАСПОЛОЖЕНИЯ
 -- ============================================================
 
 INSERT INTO locations (uid, name) VALUES
@@ -1509,7 +1591,7 @@ INSERT INTO locations (uid, name) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 -- ============================================================
--- 26. СИДЫ: ХОЛДИНГИ
+-- 27. СИДЫ: ХОЛДИНГИ
 -- ============================================================
 
 INSERT INTO holdings (name, description, location_uuid) VALUES
@@ -1518,7 +1600,7 @@ INSERT INTO holdings (name, description, location_uuid) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 -- ============================================================
--- 27. СИДЫ: ПРЕДПРИЯТИЯ
+-- 28. СИДЫ: ПРЕДПРИЯТИЯ
 -- ============================================================
 
 INSERT INTO enterprises (name, holding_id, location_uuid, description, address) VALUES
@@ -1529,7 +1611,7 @@ INSERT INTO enterprises (name, holding_id, location_uuid, description, address) 
 ON CONFLICT (name) DO NOTHING;
 
 -- ============================================================
--- 28. СИДЫ: ЦЕХА
+-- 29. СИДЫ: ЦЕХА
 -- ============================================================
 
 INSERT INTO workshops (name, enterprise_id, location_uuid, description, address) VALUES
@@ -1542,7 +1624,7 @@ INSERT INTO workshops (name, enterprise_id, location_uuid, description, address)
 ON CONFLICT (name, enterprise_id) DO NOTHING;
 
 -- ============================================================
--- 29. СИДЫ: УЧАСТКИ
+-- 30. СИДЫ: УЧАСТКИ
 -- ============================================================
 
 INSERT INTO sections (name, workshop_id) VALUES
@@ -1557,7 +1639,7 @@ INSERT INTO sections (name, workshop_id) VALUES
 ON CONFLICT (name, workshop_id) DO NOTHING;
 
 -- ============================================================
--- 30. СИДЫ: ТИПЫ СТАНЦИЙ
+-- 31. СИДЫ: ТИПЫ СТАНЦИЙ
 -- ============================================================
 
 INSERT INTO station_types (uid, name, description) VALUES
@@ -1567,7 +1649,7 @@ INSERT INTO station_types (uid, name, description) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 -- ============================================================
--- 31. СИДЫ: ПРОИЗВОДИТЕЛИ СТАНЦИЙ
+-- 32. СИДЫ: ПРОИЗВОДИТЕЛИ СТАНЦИЙ
 -- ============================================================
 
 INSERT INTO station_manufacturers (uid, name, description, country_uuid) VALUES
@@ -1577,7 +1659,7 @@ INSERT INTO station_manufacturers (uid, name, description, country_uuid) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 -- ============================================================
--- 32. СИДЫ: МОДЕЛИ СТАНЦИЙ
+-- 33. СИДЫ: МОДЕЛИ СТАНЦИЙ
 -- ============================================================
 
 INSERT INTO station_models (uid, code, name, article, revision, type_id, manufacturer_id, purpose, cells_structure) VALUES
@@ -1603,23 +1685,14 @@ INSERT INTO station_model_documents (uid, model_uid, document_name, file_path, o
 SELECT gen_random_uuid(), uid, 'Сертификат соответствия', uid::text || '_cert.pdf', 'СТ-100_cert.pdf' FROM station_models WHERE code = 1001;
 
 -- ============================================================
--- 33. СИДЫ: КОНФИГУРАЦИИ СТАНЦИЙ
+-- 34. СИДЫ: КОНФИГУРАЦИИ СТАНЦИЙ
 -- ============================================================
 
 INSERT INTO station_configurations (uid, name, model_id, cells_structure) VALUES
-    (gen_random_uuid(), 'Конфигурация СТ-100 Стандарт', (SELECT uid FROM station_models WHERE code = 1001), '{"drums": 2, "columns_per_drum": 12, "total_cells": 24}'),
-    (gen_random_uuid(), 'Конфигурация СТ-100 Расширенная', (SELECT uid FROM station_models WHERE code = 1001), '{"drums": 2, "columns_per_drum": 16, "total_cells": 32}'),
-    (gen_random_uuid(), 'Конфигурация СТ-200 Стандарт', (SELECT uid FROM station_models WHERE code = 1002), '{"drums": 3, "columns_per_drum": 16, "total_cells": 48}'),
-    (gen_random_uuid(), 'Конфигурация ПМ-50 Стандарт', (SELECT uid FROM station_models WHERE code = 2001), '{"cells": 50}')
-ON CONFLICT DO NOTHING;
-
--- ============================================================
--- 34. СИДЫ: ГРУППЫ УЧЕТА
--- ============================================================
-
-INSERT INTO spr_type_material (uid, type_name) VALUES
-    (gen_random_uuid(), 'ТМЦ'),
-    (gen_random_uuid(), 'Готовая деталь')
+    (gen_random_uuid(), 'Конфигурация СТ-100 Стандарт', (SELECT uid FROM station_models WHERE code = 1001), '{"type":"drum","drums":2,"columnsPerDrum":12,"rowsPerColumn":18,"cells":[]}'),
+    (gen_random_uuid(), 'Конфигурация СТ-100 Расширенная', (SELECT uid FROM station_models WHERE code = 1001), '{"type":"drum","drums":2,"columnsPerDrum":16,"rowsPerColumn":18,"cells":[]}'),
+    (gen_random_uuid(), 'Конфигурация СТ-200 Стандарт', (SELECT uid FROM station_models WHERE code = 1002), '{"type":"drum","drums":3,"columnsPerDrum":16,"rowsPerColumn":18,"cells":[]}'),
+    (gen_random_uuid(), 'Конфигурация ПМ-50 Стандарт', (SELECT uid FROM station_models WHERE code = 2001), '{"type":"postamat","columns":10,"cellsPerColumn":5,"cells":[]}')
 ON CONFLICT DO NOTHING;
 
 -- ============================================================
@@ -1723,7 +1796,7 @@ DECLARE
     root_uid UUID;
 BEGIN
     SELECT uid INTO root_uid FROM reg_group_material WHERE group_code = 0;
-    
+
     INSERT INTO reg_group_material (uid, group_name, parent_group, group_code) VALUES
         (gen_random_uuid(), 'Сверла твердосплавные', root_uid, 1),
         (gen_random_uuid(), 'Фрезы', root_uid, 2),
@@ -1830,13 +1903,13 @@ DECLARE
     v_country_rus UUID;
     v_country_chn UUID;
     v_country_blr UUID;
-    
+
     v_desc_producer UUID;
     v_desc_distributor UUID;
     v_desc_wholesale UUID;
     v_desc_dealer UUID;
     v_desc_importer UUID;
-    
+
     v_code INTEGER;
     v_supplier_uid UUID;
     v_logo_uid UUID;
@@ -1844,63 +1917,57 @@ BEGIN
     SELECT uid INTO v_country_rus FROM spr_country WHERE name = 'Россия';
     SELECT uid INTO v_country_chn FROM spr_country WHERE name = 'Китай';
     SELECT uid INTO v_country_blr FROM spr_country WHERE name = 'Беларусь';
-    
+
     SELECT uid INTO v_desc_producer FROM spr_supplier_description_types WHERE name = 'Производитель';
     SELECT uid INTO v_desc_distributor FROM spr_supplier_description_types WHERE name = 'Официальный дистрибьютор';
     SELECT uid INTO v_desc_wholesale FROM spr_supplier_description_types WHERE name = 'Оптовый поставщик';
     SELECT uid INTO v_desc_dealer FROM spr_supplier_description_types WHERE name = 'Дилер';
     SELECT uid INTO v_desc_importer FROM spr_supplier_description_types WHERE name = 'Импортер';
-    
+
     SELECT COALESCE(MAX(code), 0) INTO v_code FROM spr_suppliers;
-    
-    -- Поставщик 1
+
     v_code := v_code + 1;
     v_supplier_uid := gen_random_uuid();
     INSERT INTO spr_suppliers (uid, code, name, country_uid, address, short_description_uid, description, email, website, phone, inn, ogrn, kpp, contact_person, contact_position, contact_phone, director, director_position, bank_name, bik, correspondent_account, settlement_account)
     VALUES (v_supplier_uid, v_code, 'ООО "ПромСнаб"', v_country_rus, '125212, г. Москва, ул. Адмирала Макарова, д. 10, стр. 1, офис 45', v_desc_producer, 'Ведущий российский производитель и поставщик промышленного оборудования.', 'info@promsnab.ru', 'www.promsnab.ru', '+7 (495) 123-45-67', '7712345678', '1027700123456', '771201001', 'Петров Сергей Владимирович', 'Руководитель отдела продаж', '+7 (495) 123-45-68', 'Кузнецов Алексей Николаевич', 'Генеральный директор', 'ПАО "Сбербанк"', '044525225', '30101810400000000225', '40702810900000000123');
     v_logo_uid := gen_random_uuid();
     INSERT INTO spr_supplier_images (uid, supplier_uid, file_path, original_name, sort_order, created_at) VALUES (v_logo_uid, v_supplier_uid, v_logo_uid::text || '.svg', 'PromSnab_logo.svg', 0, NOW());
-    
-    -- Поставщик 2
+
     v_code := v_code + 1;
     v_supplier_uid := gen_random_uuid();
     INSERT INTO spr_suppliers (uid, code, name, country_uid, address, short_description_uid, description, email, website, phone, inn, ogrn, kpp, contact_person, contact_position, contact_phone, director, director_position, bank_name, bik, correspondent_account, settlement_account)
     VALUES (v_supplier_uid, v_code, 'АО "ТехКомплект"', v_country_rus, '620014, г. Екатеринбург, ул. Малышева, д. 51, офис 302', v_desc_distributor, 'Официальный дистрибьютор ведущих мировых производителей металлорежущего инструмента.', 'sales@techkomplekt.ru', 'www.techkomplekt.ru', '+7 (343) 234-56-78', '6671234567', '1036600123456', '667101001', 'Смирнова Елена Александровна', 'Ведущий менеджер', '+7 (343) 234-56-79', 'Морозов Дмитрий Игоревич', 'Генеральный директор', 'АО "Альфа-Банк"', '044525593', '30101810200000000593', '40702810300000000456');
     v_logo_uid := gen_random_uuid();
     INSERT INTO spr_supplier_images (uid, supplier_uid, file_path, original_name, sort_order, created_at) VALUES (v_logo_uid, v_supplier_uid, v_logo_uid::text || '.svg', 'TechKomplekt_logo.svg', 0, NOW());
-    
-    -- Поставщик 3
+
     v_code := v_code + 1;
     v_supplier_uid := gen_random_uuid();
     INSERT INTO spr_suppliers (uid, code, name, country_uid, address, short_description_uid, description, email, website, phone, inn, ogrn, kpp, contact_person, contact_position, contact_phone, director, director_position, bank_name, bik, correspondent_account, settlement_account)
     VALUES (v_supplier_uid, v_code, 'ИП Иванов А.А.', v_country_blr, '220030, Республика Беларусь, г. Минск, ул. Интернациональная, д. 15', v_desc_wholesale, 'Индивидуальный предприниматель. Специализация: метизы, крепежные изделия.', 'ivanov@metiz.by', 'www.ivanov-metiz.by', '+375 (17) 345-67-89', '192345678', '304192345600012', '—', 'Иванов Александр Александрович', 'Собственник', '+375 (29) 111-22-33', 'Иванов Александр Александрович', 'Индивидуальный предприниматель', 'ОАО "АСБ Беларусбанк"', '153001795', '30101810200000000795', '40702810900000000789');
     v_logo_uid := gen_random_uuid();
     INSERT INTO spr_supplier_images (uid, supplier_uid, file_path, original_name, sort_order, created_at) VALUES (v_logo_uid, v_supplier_uid, v_logo_uid::text || '.svg', 'Ivanov_logo.svg', 0, NOW());
-    
-    -- Поставщик 4
+
     v_code := v_code + 1;
     v_supplier_uid := gen_random_uuid();
     INSERT INTO spr_suppliers (uid, code, name, country_uid, address, short_description_uid, description, email, website, phone, inn, ogrn, kpp, contact_person, contact_position, contact_phone, director, director_position, bank_name, bik, correspondent_account, settlement_account)
     VALUES (v_supplier_uid, v_code, 'ООО "МетизТорг"', v_country_rus, '603000, г. Нижний Новгород, ул. Белинского, д. 32, пом. 12', v_desc_dealer, 'Дилерская сеть по продаже металлоизделий и крепежа.', 'info@metiztorg.ru', 'www.metiztorg.ru', '+7 (831) 456-78-90', '5261234567', '1035200123456', '526101001', 'Козлов Павел Сергеевич', 'Менеджер по работе с клиентами', '+7 (831) 456-78-91', 'Новикова Ольга Владимировна', 'Исполнительный директор', 'ПАО "ВТБ"', '044525187', '30101810200000000187', '40702810400000001012');
     v_logo_uid := gen_random_uuid();
     INSERT INTO spr_supplier_images (uid, supplier_uid, file_path, original_name, sort_order, created_at) VALUES (v_logo_uid, v_supplier_uid, v_logo_uid::text || '.svg', 'MetizTorg_logo.svg', 0, NOW());
-    
-    -- Поставщик 5
+
     v_code := v_code + 1;
     v_supplier_uid := gen_random_uuid();
     INSERT INTO spr_suppliers (uid, code, name, country_uid, address, short_description_uid, description, email, website, phone, inn, ogrn, kpp, contact_person, contact_position, contact_phone, director, director_position, bank_name, bik, correspondent_account, settlement_account)
     VALUES (v_supplier_uid, v_code, 'ЗАО "ИнструментСервис"', v_country_chn, '430000, Китай, г. Шанхай, Pudong New Area', v_desc_importer, 'Прямой импортер высокоточного режущего инструмента из Китая.', 'order@instrumentservice.pro', 'www.instrumentservice.pro', '+86 (21) 1234-5678', '9901234567', '1039900123456', '990101001', 'Чжан Вэй', 'Руководитель отдела ВЭД', '+86 (21) 1234-5679', 'Ли Цзянь', 'Генеральный директор', 'Bank of China, Shanghai Branch', 'BKCHCNBJ300', '30101810200000000300', '40702810900000001314');
     v_logo_uid := gen_random_uuid();
     INSERT INTO spr_supplier_images (uid, supplier_uid, file_path, original_name, sort_order, created_at) VALUES (v_logo_uid, v_supplier_uid, v_logo_uid::text || '.svg', 'InstrumentService_logo.svg', 0, NOW());
-    
-    -- Поставщик 6
+
     v_code := v_code + 1;
     v_supplier_uid := gen_random_uuid();
     INSERT INTO spr_suppliers (uid, code, name, country_uid, address, short_description_uid, description, email, website, phone, inn, ogrn, kpp, contact_person, contact_position, contact_phone, director, director_position, bank_name, bik, correspondent_account, settlement_account)
     VALUES (v_supplier_uid, v_code, 'ООО "ЗАДЕЛ"', v_country_rus, '105264, г. Москва, ул. Верхняя Первомайская, д. 47, стр. 3', v_desc_producer, 'Российский производитель технологической оснастки и заделов.', 'info@zadel.pro', 'www.zadel.pro', '+7 (495) 987-65-43', '7719876543', '1027700987654', '771901001', 'Григорьев Андрей Павлович', 'Начальник отдела сбыта', '+7 (495) 987-65-44', 'Соколов Михаил Леонидович', 'Генеральный директор', 'ПАО "Сбербанк"', '044525225', '30101810400000000225', '40702810900000005678');
     v_logo_uid := gen_random_uuid();
     INSERT INTO spr_supplier_images (uid, supplier_uid, file_path, original_name, sort_order, created_at) VALUES (v_logo_uid, v_supplier_uid, v_logo_uid::text || '.svg', 'ZADEL_logo.svg', 0, NOW());
-    
+
 END $$;
 
 -- ============================================================
@@ -1944,7 +2011,7 @@ DECLARE
     v_model_uid UUID;
     v_country_uid UUID;
     v_group_uid UUID;
-    
+
     v_attr_length_uid UUID;
     v_attr_width_uid UUID;
     v_attr_height_uid UUID;
@@ -1959,13 +2026,13 @@ DECLARE
     v_attr_purpose_uid UUID;
     v_attr_material_group_uid UUID;
     v_attr_feature_uid UUID;
-    
+
     v_material_uid UUID;
     v_photo_uid UUID;
     v_blueprint_uid UUID;
     v_qr_uid UUID;
     v_code INTEGER;
-    
+
     v_data TEXT[][] := ARRAY[
         ARRAY['1', '8', 'DH2240100', 'Сверло твердосплавное 5XD с покрытием TiАIN 1X3X8X55'],
         ARRAY['1.1', '12', 'DH2240110', 'Сверло твердосплавное 5XD с покрытием TiАIN 1.1X3X12X55'],
@@ -1978,9 +2045,9 @@ DECLARE
         ARRAY['1.8', '16', 'DH2240180', 'Сверло твердосплавное 5XD с покрытием TiАIN 1.8X3X16X55'],
         ARRAY['1.83', '16', 'DH2240183', 'Сверло твердосплавное 5XD с покрытием TiАIN 1.83X3X16X55']
     ];
-    
+
     v_description TEXT := 'Спиральное сверло из твердого сплава с правым вращением и цилиндрическим хвостовиком без каналов для подачи охлаждающей жидкости.';
-    
+
     v_idx INTEGER;
     v_diameter TEXT;
     v_article TEXT;
@@ -1997,7 +2064,7 @@ BEGIN
     SELECT uid INTO v_model_uid FROM spr_model_of_brand WHERE name = 'DH224';
     SELECT uid INTO v_country_uid FROM spr_country WHERE name = 'Китай';
     SELECT uid INTO v_group_uid FROM reg_group_material WHERE group_name = 'Сверла твердосплавные';
-    
+
     SELECT uid INTO v_attr_length_uid FROM spr_type_attributes WHERE name = 'Длина';
     SELECT uid INTO v_attr_width_uid FROM spr_type_attributes WHERE name = 'Ширина';
     SELECT uid INTO v_attr_height_uid FROM spr_type_attributes WHERE name = 'Высота';
@@ -2012,20 +2079,20 @@ BEGIN
     SELECT uid INTO v_attr_purpose_uid FROM spr_type_attributes WHERE name = 'Назначение';
     SELECT uid INTO v_attr_material_group_uid FROM spr_type_attributes WHERE name = 'Группа обрабатываемых материалов';
     SELECT uid INTO v_attr_feature_uid FROM spr_type_attributes WHERE name = 'Особенность инструмента';
-    
+
     SELECT COALESCE(MAX(code_material), 0) INTO v_code FROM spr_material;
-    
+
     FOR v_idx IN 1..10 LOOP
         v_diameter := v_data[v_idx][1];
         v_article := v_data[v_idx][3];
         v_name := v_data[v_idx][4];
-        
+
         v_code := v_code + 1;
         v_material_uid := gen_random_uuid();
-        
+
         INSERT INTO spr_material (uid, code_material, name_material, article, description, group_material, type_main, type_purpose, type_product, manufacturer, brand, model_of_brand, country, measure, usage, resharpen, waste_material, recycle_material, syncronized_mother_system, syncronized_supplier)
         VALUES (v_material_uid, v_code, v_name, v_article, v_description, v_group_uid, v_tmc_uid, v_purpose_uid, v_product_uid, v_manufacturer_uid, v_brand_uid, v_model_uid, v_country_uid, v_measure_sht_uid, true, false, false, false, true, true);
-        
+
         INSERT INTO reg_attributes (uid, name, meaning, measure_uid, material_uid) VALUES
             (gen_random_uuid(), v_attr_length_uid, '55', v_measure_mm_uid, v_material_uid),
             (gen_random_uuid(), v_attr_width_uid, v_diameter, v_measure_mm_uid, v_material_uid),
@@ -2041,18 +2108,18 @@ BEGIN
             (gen_random_uuid(), v_attr_purpose_uid, 'Универсальные', NULL, v_material_uid),
             (gen_random_uuid(), v_attr_material_group_uid, 'P-стали; M-нержавеющие стали; K-чугун; H-Твердые закаленные материалы', NULL, v_material_uid),
             (gen_random_uuid(), v_attr_feature_uid, 'Удлиненное (от 5 до 10хD)', NULL, v_material_uid);
-        
+
         v_photo_uid := gen_random_uuid();
         INSERT INTO spr_material_images (uid, material_uid, file_path, original_name, sort_order, created_at) VALUES (v_photo_uid, v_material_uid, v_photo_uid::text || '.png', v_article || '_photo.png', 0, NOW());
-        
+
         v_blueprint_uid := gen_random_uuid();
         INSERT INTO spr_material_blueprints (uid, material_uid, file_path, original_name, created_at) VALUES (v_blueprint_uid, v_material_uid, v_blueprint_uid::text || '.png', v_article || '_blueprint.png', NOW());
-        
+
         v_qr_uid := gen_random_uuid();
         INSERT INTO spr_material_codes (uid, material_uid, file_path, original_name, code_type, code_value, code_kind, created_at) VALUES (v_qr_uid, v_material_uid, v_qr_uid::text || '.png', v_article || '_qr.png', 'QR_CODE', v_article, 'QR', NOW());
-        
+
     END LOOP;
-    
+
 END $$;
 
 -- ============================================================
@@ -2070,40 +2137,40 @@ DECLARE
     v_price_value DOUBLE PRECISION;
 BEGIN
     SELECT uid INTO v_supplier_uid FROM spr_suppliers WHERE name = 'ЗАО "ИнструментСервис"';
-    
+
     FOR v_idx IN 1..10 LOOP
         SELECT uid INTO v_material_uid FROM spr_material WHERE code_material = v_idx LIMIT 1;
-        
+
         IF v_material_uid IS NOT NULL THEN
             v_doc_entrance_uid := gen_random_uuid();
             v_price_value := 1500 + (v_idx * 100);
-            
+
             INSERT INTO doc_entrance (uid, price, supplier, entrance_date) VALUES (v_doc_entrance_uid, v_price_value, v_supplier_uid, NOW() - INTERVAL '30 days');
-            
+
             v_price_uid := gen_random_uuid();
             INSERT INTO reg_price (uid, price, price_date, link, doc_entrance_uid) VALUES (v_price_uid, v_price_value, NOW() - INTERVAL '30 days', v_material_uid, v_doc_entrance_uid);
-            
+
             v_reg_supplier_uid := gen_random_uuid();
             INSERT INTO reg_suppliers (uid, material_uid, supplier_uid, supply_date, document_name, file_path, original_name) VALUES (v_reg_supplier_uid, v_material_uid, v_supplier_uid, NOW() - INTERVAL '30 days', 'Накладная ' || v_idx, v_reg_supplier_uid::text || '.pdf', 'Накладная_' || v_idx || '.pdf');
-            
+
             UPDATE spr_material SET price = v_price_uid, suppliers = v_reg_supplier_uid WHERE uid = v_material_uid;
         END IF;
     END LOOP;
 END $$;
 
 -- ============================================================
--- 47. СИДЫ: КАТЕГОРИИ ШАБЛОНОВ
+-- 47. СИДЫ: КАТЕГОРИИ ШАБЛОНОВ (с code и родителями)
 -- ============================================================
 
-INSERT INTO template_categories (name) VALUES
-    ('Инструментальные'),
-    ('Универсальные'),
-    ('Специальные'),
-    ('Тестовые')
+INSERT INTO template_categories (name, code) VALUES
+    ('Инструментальные', 1),
+    ('Универсальные', 2),
+    ('Специальные', 3),
+    ('Тестовые', 4)
 ON CONFLICT (name) DO NOTHING;
 
 -- ============================================================
--- 48. СИДЫ: ШАБЛОНЫ ПОПОЛНЕНИЯ
+-- 48. СИДЫ: ШАБЛОНЫ ПОПОЛНЕНИЯ (новая структура reg_cells)
 -- ============================================================
 
 DO $$
@@ -2116,41 +2183,43 @@ DECLARE
     v_cell_uid UUID;
     v_material_uid UUID;
     v_cell_idx INTEGER;
+    v_assignment_tmc_uid UUID;
 BEGIN
     SELECT id INTO v_category_inst_id FROM template_categories WHERE name = 'Инструментальные';
     SELECT uid INTO v_config_st100_uid FROM station_configurations WHERE name = 'Конфигурация СТ-100 Стандарт';
     SELECT uid INTO v_config_st200_uid FROM station_configurations WHERE name = 'Конфигурация СТ-200 Стандарт';
-    
+    SELECT uid INTO v_assignment_tmc_uid FROM spr_cell_assignment WHERE name = 'ТМЦ';
+
     SELECT COALESCE(MAX(number), 0) INTO v_counter FROM doc_pattern;
-    
+
     v_counter := v_counter + 1;
     v_template_uid := gen_random_uuid();
     INSERT INTO doc_pattern (uid, name_pattern, number, category_id, configuration_uid, total_cells, filled_cells, free_cells) VALUES (v_template_uid, 'Шаблон СТ-100 №1', v_counter, v_category_inst_id, v_config_st100_uid, 24, 10, 14);
-    
+
     FOR v_cell_idx IN 1..10 LOOP
         SELECT uid INTO v_material_uid FROM spr_material WHERE code_material = v_cell_idx LIMIT 1;
-        
+
         IF v_material_uid IS NOT NULL THEN
             v_cell_uid := gen_random_uuid();
-            INSERT INTO reg_cells (uid, doc_pattern_uid, number_cell, column_number, drum_number, name_material, quantity, type_main, purpose_material, max_quantity)
-            VALUES (v_cell_uid, v_template_uid, v_cell_idx, CASE WHEN v_cell_idx <= 8 THEN v_cell_idx ELSE v_cell_idx - 8 END, CASE WHEN v_cell_idx <= 8 THEN 1 ELSE 2 END, v_material_uid, 5 + v_cell_idx, (SELECT type_main FROM spr_material WHERE uid = v_material_uid), 'Основное назначение', 20 + v_cell_idx);
+            INSERT INTO reg_cells (uid, doc_pattern_uid, number_cell, column_number, drum_number, cell_assignment_uid, name_material, quantity, return_to_this_cell, is_individual)
+            VALUES (v_cell_uid, v_template_uid, v_cell_idx, CASE WHEN v_cell_idx <= 8 THEN v_cell_idx ELSE v_cell_idx - 8 END, CASE WHEN v_cell_idx <= 8 THEN 1 ELSE 2 END, v_assignment_tmc_uid, v_material_uid, 5 + v_cell_idx, false, false);
         END IF;
     END LOOP;
-    
+
     v_counter := v_counter + 1;
     v_template_uid := gen_random_uuid();
     INSERT INTO doc_pattern (uid, name_pattern, number, category_id, configuration_uid, total_cells, filled_cells, free_cells) VALUES (v_template_uid, 'Шаблон СТ-200 №1', v_counter, v_category_inst_id, v_config_st200_uid, 48, 10, 38);
-    
+
     FOR v_cell_idx IN 1..10 LOOP
         SELECT uid INTO v_material_uid FROM spr_material WHERE code_material = v_cell_idx LIMIT 1;
-        
+
         IF v_material_uid IS NOT NULL THEN
             v_cell_uid := gen_random_uuid();
-            INSERT INTO reg_cells (uid, doc_pattern_uid, number_cell, column_number, drum_number, name_material, quantity, type_main, purpose_material, max_quantity)
-            VALUES (v_cell_uid, v_template_uid, v_cell_idx, CASE WHEN v_cell_idx <= 8 THEN v_cell_idx ELSE v_cell_idx - 8 END, CASE WHEN v_cell_idx <= 8 THEN 1 ELSE 2 END, v_material_uid, 8 + v_cell_idx, (SELECT type_main FROM spr_material WHERE uid = v_material_uid), 'Универсальное назначение', 30 + v_cell_idx);
+            INSERT INTO reg_cells (uid, doc_pattern_uid, number_cell, column_number, drum_number, cell_assignment_uid, name_material, quantity, return_to_this_cell, is_individual)
+            VALUES (v_cell_uid, v_template_uid, v_cell_idx, CASE WHEN v_cell_idx <= 8 THEN v_cell_idx ELSE v_cell_idx - 8 END, CASE WHEN v_cell_idx <= 8 THEN 1 ELSE 2 END, v_assignment_tmc_uid, v_material_uid, 8 + v_cell_idx, false, false);
         END IF;
     END LOOP;
-    
+
 END $$;
 
 -- ============================================================
@@ -2217,10 +2286,10 @@ BEGIN
     SELECT uid INTO v_model_1002_uid FROM station_models WHERE code = 1002;
     SELECT uid INTO v_model_2001_uid FROM station_models WHERE code = 2001;
     SELECT uid INTO v_model_3001_uid FROM station_models WHERE code = 3001;
-    
+
     SELECT uid INTO v_config_st100_uid FROM station_configurations WHERE name = 'Конфигурация СТ-100 Стандарт';
     SELECT uid INTO v_config_st200_uid FROM station_configurations WHERE name = 'Конфигурация СТ-200 Стандарт';
-    
+
     SELECT uid INTO v_template1_uid FROM doc_pattern WHERE name_pattern = 'Шаблон СТ-100 №1';
     SELECT uid INTO v_template2_uid FROM doc_pattern WHERE name_pattern = 'Шаблон СТ-200 №1';
 
@@ -2239,10 +2308,10 @@ BEGIN
         ('ST-009', 'Дополнительный модуль 3', v_counter + 9, 'Дополнительный модуль для СТ-003', DATE '2024-10-01', 'SN-009-2024', v_model_3001_uid, NULL, hold_north_id, ent2_id, ws3_id, secE_id, 'MINIMAL_STOCK', 6, 6, 5, 1, 30, 28, 'ST-003', false, false, false, false, true, false, NULL, NULL, NULL),
         ('ST-010', 'Постамат ПМ-50', v_counter + 10, 'Постамат для выдачи готовых деталей', DATE '2024-11-15', 'SN-010-2024', v_model_2001_uid, NULL, hold_south_id, ent4_id, ws6_id, secH_id, 'WORKING', 50, 45, 42, 8, 200, 178, NULL, false, false, true, false, false, false, '192.168.4.101', 8083, NULL)
     ON CONFLICT (uid) DO NOTHING;
-    
+
     UPDATE stations SET has_additional_module = true WHERE uid = 'ST-001';
     UPDATE stations SET has_additional_module = true WHERE uid = 'ST-003';
-    
+
 END $$;
 
 -- ============================================================
@@ -2282,11 +2351,11 @@ BEGIN
     INSERT INTO reg_supplier_ratings (uid, supplier_uid, rating, comment, author, created_at) VALUES
         (gen_random_uuid(), v_supplier_uid, 5, 'Отличный поставщик, всегда вовремя', 'admin', NOW() - INTERVAL '15 days'),
         (gen_random_uuid(), v_supplier_uid, 4, 'Хорошее качество продукции', 'operator', NOW() - INTERVAL '10 days');
-    
+
     SELECT uid INTO v_supplier_uid FROM spr_suppliers WHERE name = 'АО "ТехКомплект"';
     INSERT INTO reg_supplier_ratings (uid, supplier_uid, rating, comment, author, created_at) VALUES
         (gen_random_uuid(), v_supplier_uid, 5, 'Профессиональный подход', 'admin', NOW() - INTERVAL '8 days');
-    
+
     SELECT uid INTO v_supplier_uid FROM spr_suppliers WHERE name = 'ЗАО "ИнструментСервис"';
     INSERT INTO reg_supplier_ratings (uid, supplier_uid, rating, comment, author, created_at) VALUES
         (gen_random_uuid(), v_supplier_uid, 4, 'Хорошие цены, доставка 2 недели', 'admin', NOW() - INTERVAL '5 days');
@@ -2303,7 +2372,7 @@ BEGIN
     SELECT uid INTO v_supplier_uid FROM spr_suppliers WHERE name = 'ООО "ПромСнаб"';
     INSERT INTO reg_supplier_integration (uid, supplier_uid, event, exchange_type, direction, protocol, target_system, created_at) VALUES
         (gen_random_uuid(), v_supplier_uid, 'Объект синхронизирован', 'API', 'OUT', 'REST', '1C:ERP', NOW() - INTERVAL '20 days');
-    
+
     SELECT uid INTO v_supplier_uid FROM spr_suppliers WHERE name = 'ЗАО "ИнструментСервис"';
     INSERT INTO reg_supplier_integration (uid, supplier_uid, event, exchange_type, direction, protocol, target_system, created_at) VALUES
         (gen_random_uuid(), v_supplier_uid, 'Объект синхронизирован', 'FILE', 'IN', 'XML', 'AWMS', NOW() - INTERVAL '15 days');
@@ -2321,7 +2390,7 @@ BEGIN
     INSERT INTO reg_supplier_event_log (uid, supplier_uid, event_type, event_description, field_name, old_value, new_value, author, source, created_at) VALUES
         (gen_random_uuid(), v_supplier_uid, 'CREATE', 'Поставщик создан', NULL, NULL, NULL, 'admin', 'Система', NOW() - INTERVAL '30 days'),
         (gen_random_uuid(), v_supplier_uid, 'UPDATE', 'Обновлен телефон', 'phone', '+7 (495) 000-00-00', '+7 (495) 123-45-67', 'admin', 'Через карточку', NOW() - INTERVAL '10 days');
-    
+
     SELECT uid INTO v_supplier_uid FROM spr_suppliers WHERE name = 'АО "ТехКомплект"';
     INSERT INTO reg_supplier_event_log (uid, supplier_uid, event_type, event_description, field_name, old_value, new_value, author, source, created_at) VALUES
         (gen_random_uuid(), v_supplier_uid, 'CREATE', 'Поставщик создан', NULL, NULL, NULL, 'admin', 'Система', NOW() - INTERVAL '25 days');
@@ -2338,7 +2407,7 @@ DECLARE
 BEGIN
     FOR v_idx IN 1..10 LOOP
         SELECT uid INTO v_material_uid FROM spr_material WHERE code_material = v_idx LIMIT 1;
-        
+
         IF v_material_uid IS NOT NULL THEN
             INSERT INTO reg_rating (uid, material_uid, rating, comment, author, created_at) VALUES (gen_random_uuid(), v_material_uid, 3 + (v_idx % 3), 'Хорошее качество, рекомендую', 'admin', NOW() - (v_idx || ' days')::INTERVAL);
         END IF;
@@ -2356,7 +2425,7 @@ DECLARE
 BEGIN
     FOR v_idx IN 1..10 LOOP
         SELECT uid INTO v_material_uid FROM spr_material WHERE code_material = v_idx LIMIT 1;
-        
+
         IF v_material_uid IS NOT NULL THEN
             INSERT INTO reg_integration (uid, material_uid, event, exchange_type, direction, protocol, target_system, created_at) VALUES (gen_random_uuid(), v_material_uid, 'Объект синхронизирован', 'API', 'OUT', 'REST', '1C:ERP', NOW() - (v_idx || ' days')::INTERVAL);
         END IF;
@@ -2374,7 +2443,7 @@ DECLARE
 BEGIN
     FOR v_idx IN 1..10 LOOP
         SELECT uid INTO v_material_uid FROM spr_material WHERE code_material = v_idx LIMIT 1;
-        
+
         IF v_material_uid IS NOT NULL THEN
             INSERT INTO reg_event_log (uid, material_uid, event_type, event_description, field_name, old_value, new_value, author, source, created_at) VALUES (gen_random_uuid(), v_material_uid, 'CREATE', 'Номенклатура создана', NULL, NULL, NULL, 'admin', 'Система', NOW() - (v_idx || ' days')::INTERVAL);
         END IF;
@@ -2392,14 +2461,14 @@ DECLARE
 BEGIN
     SELECT uid INTO v_mat1_uid FROM spr_material WHERE code_material = 1 LIMIT 1;
     SELECT uid INTO v_mat2_uid FROM spr_material WHERE code_material = 2 LIMIT 1;
-    
+
     IF v_mat1_uid IS NOT NULL AND v_mat2_uid IS NOT NULL THEN
         INSERT INTO reg_analog (uid, material_uid, analog_material_uid, compatibility_percent, created_at) VALUES (gen_random_uuid(), v_mat1_uid, v_mat2_uid, 95, NOW());
     END IF;
-    
+
     SELECT uid INTO v_mat1_uid FROM spr_material WHERE code_material = 3 LIMIT 1;
     SELECT uid INTO v_mat2_uid FROM spr_material WHERE code_material = 4 LIMIT 1;
-    
+
     IF v_mat1_uid IS NOT NULL AND v_mat2_uid IS NOT NULL THEN
         INSERT INTO reg_analog (uid, material_uid, analog_material_uid, compatibility_percent, created_at) VALUES (gen_random_uuid(), v_mat1_uid, v_mat2_uid, 90, NOW());
     END IF;
@@ -2424,4 +2493,6 @@ WHERE NOT EXISTS (SELECT 1 FROM user_nomenclature_column_settings WHERE user_id 
 INSERT INTO test_documents (user_id, title, field2, field3, completed) VALUES
     (1, 'Тестовый документ 1', 'Поле 2 значение 1', 'Поле 3 значение 1', false),
     (1, 'Тестовый документ 2', 'Поле 2 значение 2', 'Поле 3 значение 2', true),
-    (1, 'Тестовый документ 3', 'Поле 2 значение 3', 'Поле 3 значение 3', false)
+    (1, 'Тестовый документ 3', 'Поле 2 значение 3', 'Поле 3 значение 3', false);
+
+COMMIT;

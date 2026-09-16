@@ -1,4 +1,4 @@
-// dto/SaveBatchCellsRequest.java
+// SaveBatchCellsRequest.java — ПОЛНЫЙ ФАЙЛ
 package com.example.dinamika_back.dto;
 
 import lombok.Data;
@@ -15,12 +15,10 @@ public class SaveBatchCellsRequest {
         private Integer numberCell;
         private Integer columnNumber;
         private Integer drumNumber;
+        private UUID cellAssignmentUid;
         private UUID materialUid;
         private Integer quantity;
-        private UUID typeMainUid;
-        private String purposeMaterial;
-        private String purposeSgd;
-        private Integer maxQuantity;
-        private String dimensions;
+        private Boolean returnToThisCell;
+        private Boolean isIndividual;
     }
 }

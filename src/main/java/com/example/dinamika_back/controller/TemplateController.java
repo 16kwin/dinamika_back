@@ -1,8 +1,9 @@
-// TemplateController.java — ПОЛНЫЙ ФАЙЛ (добавлен batch-save ячеек)
+// TemplateController.java — ПОЛНЫЙ ФАЙЛ (иерархия категорий + настройки + назначения ячеек)
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
 import com.example.dinamika_back.service.TemplateService;
+import com.example.dinamika_back.service.TemplateColumnSettingsService;
 import com.example.dinamika_back.service.OfficeExportService;
 import com.example.dinamika_back.service.PdfExportService;
 import lombok.RequiredArgsConstructor;
@@ -21,8 +22,97 @@ import java.util.UUID;
 public class TemplateController {
 
     private final TemplateService templateService;
+    private final TemplateColumnSettingsService columnSettingsService;
     private final PdfExportService pdfExportService;
     private final OfficeExportService officeExportService;
+
+    // ==================== НАЗНАЧЕНИЯ ЯЧЕЕК ====================
+
+    @GetMapping("/cell-assignments")
+    public ResponseEntity<List<CellAssignmentDto>> getAllCellAssignments() {
+        return ResponseEntity.ok(templateService.getAllCellAssignments());
+    }
+
+    // ==================== ДЕРЕВО С НАСТРОЙКАМИ ====================
+
+    @GetMapping("/tree-with-settings")
+    public ResponseEntity<TemplatesTreeResponse> getTreeWithSettings(@RequestParam Integer userId) {
+        return ResponseEntity.ok(templateService.getTreeWithSettings(userId));
+    }
+
+    // ==================== НАСТРОЙКИ ====================
+
+    @GetMapping("/settings")
+    public ResponseEntity<Map<String, String>> getAllSettings(@RequestParam Integer userId) {
+        return ResponseEntity.ok(Map.of(
+                "columnsJson", nullSafe(columnSettingsService.getColumnsJson(userId)),
+                "filtersJson", nullSafe(columnSettingsService.getFiltersJson(userId)),
+                "sortJson", nullSafe(columnSettingsService.getSortJson(userId)),
+                "currentPathJson", nullSafe(columnSettingsService.getCurrentPathJson(userId))
+        ));
+    }
+
+    @PatchMapping("/settings")
+    public ResponseEntity<Void> saveAllSettings(@RequestParam Integer userId,
+                                                @RequestBody Map<String, String> body) {
+        if (body.containsKey("columnsJson")) columnSettingsService.saveColumnsJson(userId, body.get("columnsJson"));
+        if (body.containsKey("filtersJson")) columnSettingsService.saveFiltersJson(userId, body.get("filtersJson"));
+        if (body.containsKey("sortJson")) columnSettingsService.saveSortJson(userId, body.get("sortJson"));
+        if (body.containsKey("currentPathJson")) columnSettingsService.saveCurrentPathJson(userId, body.get("currentPathJson"));
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/columns-settings")
+    public ResponseEntity<Map<String, String>> getColumnsSettings(@RequestParam Integer userId) {
+        return ResponseEntity.ok(Map.of("columnsJson", nullSafe(columnSettingsService.getColumnsJson(userId))));
+    }
+
+    @PatchMapping("/columns-settings")
+    public ResponseEntity<Void> saveColumnsSettings(@RequestParam Integer userId,
+                                                    @RequestBody Map<String, String> body) {
+        columnSettingsService.saveColumnsJson(userId, body.get("columnsJson"));
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/filters-settings")
+    public ResponseEntity<Map<String, String>> getFiltersSettings(@RequestParam Integer userId) {
+        return ResponseEntity.ok(Map.of("filtersJson", nullSafe(columnSettingsService.getFiltersJson(userId))));
+    }
+
+    @PatchMapping("/filters-settings")
+    public ResponseEntity<Void> saveFiltersSettings(@RequestParam Integer userId,
+                                                    @RequestBody Map<String, String> body) {
+        columnSettingsService.saveFiltersJson(userId, body.get("filtersJson"));
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/sort-settings")
+    public ResponseEntity<Map<String, String>> getSortSettings(@RequestParam Integer userId) {
+        return ResponseEntity.ok(Map.of("sortJson", nullSafe(columnSettingsService.getSortJson(userId))));
+    }
+
+    @PatchMapping("/sort-settings")
+    public ResponseEntity<Void> saveSortSettings(@RequestParam Integer userId,
+                                                 @RequestBody Map<String, String> body) {
+        columnSettingsService.saveSortJson(userId, body.get("sortJson"));
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/current-path")
+    public ResponseEntity<Map<String, String>> getCurrentPath(@RequestParam Integer userId) {
+        return ResponseEntity.ok(Map.of("currentPathJson", nullSafe(columnSettingsService.getCurrentPathJson(userId))));
+    }
+
+    @PatchMapping("/current-path")
+    public ResponseEntity<Void> saveCurrentPath(@RequestParam Integer userId,
+                                                @RequestBody Map<String, String> body) {
+        columnSettingsService.saveCurrentPathJson(userId, body.get("currentPathJson"));
+        return ResponseEntity.noContent().build();
+    }
+
+    private String nullSafe(String s) {
+        return s != null ? s : "{}";
+    }
 
     // ==================== КАТЕГОРИИ ====================
 
@@ -36,14 +126,19 @@ public class TemplateController {
         return ResponseEntity.ok(templateService.getCategoryById(id));
     }
 
+    @GetMapping("/categories/uid/{uid}")
+    public ResponseEntity<TemplateCategoryDto> getCategoryByUid(@PathVariable UUID uid) {
+        return ResponseEntity.ok(templateService.getCategoryByUid(uid));
+    }
+
     @PostMapping("/categories")
-    public ResponseEntity<TemplateCategoryDto> createCategory(@RequestBody TemplateCategoryRequest request) {
+    public ResponseEntity<TemplateCategoryDto> createCategory(@RequestBody CreateTemplateCategoryRequest request) {
         return ResponseEntity.ok(templateService.createCategory(request));
     }
 
     @PutMapping("/categories/{id}")
     public ResponseEntity<TemplateCategoryDto> updateCategory(@PathVariable Long id,
-            @RequestBody TemplateCategoryRequest request) {
+            @RequestBody CreateTemplateCategoryRequest request) {
         return ResponseEntity.ok(templateService.updateCategory(id, request));
     }
 
@@ -51,6 +146,11 @@ public class TemplateController {
     public ResponseEntity<Void> deleteCategory(@PathVariable Long id) {
         templateService.deleteCategory(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/categories/move")
+    public ResponseEntity<TemplateCategoryDto> moveCategory(@RequestBody MoveCategoryRequest request) {
+        return ResponseEntity.ok(templateService.moveCategory(request.getCategoryUid(), request.getNewParentUid()));
     }
 
     // ==================== ШАБЛОНЫ ====================
@@ -88,6 +188,11 @@ public class TemplateController {
     @PostMapping("/copy")
     public ResponseEntity<TemplateDto> copyTemplate(@RequestBody TemplateCopyRequest request) {
         return ResponseEntity.ok(templateService.copyTemplate(request));
+    }
+
+    @PostMapping("/move")
+    public ResponseEntity<TemplateDto> moveTemplate(@RequestBody MoveTemplateRequest request) {
+        return ResponseEntity.ok(templateService.moveTemplate(request.getTemplateUid(), request.getNewCategoryUid()));
     }
 
     @GetMapping("/{uid}/stations")
@@ -169,8 +274,7 @@ public class TemplateController {
 
         byte[] excel = officeExportService.exportExcel(title, columns, columnLabels, data, footerLines);
         return ResponseEntity.ok()
-                .contentType(
-                        MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"templates.xlsx\"")
                 .body(excel);
     }
@@ -185,8 +289,7 @@ public class TemplateController {
 
         byte[] word = officeExportService.exportWord(title, columns, columnLabels, data, footerLines);
         return ResponseEntity.ok()
-                .contentType(MediaType
-                        .parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"templates.docx\"")
                 .body(word);
     }
