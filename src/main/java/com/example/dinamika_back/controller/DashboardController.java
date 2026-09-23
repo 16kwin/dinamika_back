@@ -1,7 +1,11 @@
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.DashboardEconomicResponse;
+import com.example.dinamika_back.dto.DashboardOperatorResponse;
+import com.example.dinamika_back.dto.DashboardQualityResponse;
 import com.example.dinamika_back.dto.DashboardSettingsDTO;
+import com.example.dinamika_back.service.DashboardOperatorService;
+import com.example.dinamika_back.service.DashboardQualityService;
 import com.example.dinamika_back.service.DashboardService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -14,7 +18,8 @@ import java.time.format.DateTimeParseException;
 import java.util.Map;
 
 /**
- * Панель «Экономический блок» (permitAll, см. SecurityConfig).
+ * Информационные панели главной страницы: «Экономический блок», «Показатели» и «Оператор склада»
+ * (permitAll, см. SecurityConfig).
  */
 @RestController
 @RequestMapping("/api/dashboard")
@@ -22,6 +27,8 @@ import java.util.Map;
 public class DashboardController {
 
     private final DashboardService dashboardService;
+    private final DashboardQualityService dashboardQualityService;
+    private final DashboardOperatorService dashboardOperatorService;
 
     // ==================== Данные панели ====================
 
@@ -37,6 +44,25 @@ public class DashboardController {
             throw new IllegalArgumentException("Дата from не может быть позже даты to");
         }
         return ResponseEntity.ok(dashboardService.getEconomic(dateFrom, dateTo, userId));
+    }
+
+    /** Панель «Показатели» (топ-менеджмент): расход объема, уровень брака, качество, производство */
+    @GetMapping("/quality")
+    public ResponseEntity<DashboardQualityResponse> getQuality(
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        LocalDate dateFrom = parseDate("from", from);
+        LocalDate dateTo = parseDate("to", to);
+        if (dateFrom.isAfter(dateTo)) {
+            throw new IllegalArgumentException("Дата from не может быть позже даты to");
+        }
+        return ResponseEntity.ok(dashboardQualityService.getQuality(dateFrom, dateTo));
+    }
+
+    /** Панель «Оператор склада»: показатели на последнюю дату, остатки станций и ленты — без периода */
+    @GetMapping("/operator")
+    public ResponseEntity<DashboardOperatorResponse> getOperator() {
+        return ResponseEntity.ok(dashboardOperatorService.getOperator());
     }
 
     // ==================== Settings ====================
