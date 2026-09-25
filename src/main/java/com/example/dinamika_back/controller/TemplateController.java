@@ -1,4 +1,4 @@
-// TemplateController.java — ПОЛНЫЙ ФАЙЛ (иерархия категорий + настройки + назначения ячеек)
+// TemplateController.java — ПОЛНЫЙ ФАЙЛ (с эндпоинтами истории)
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
@@ -31,6 +31,18 @@ public class TemplateController {
     @GetMapping("/cell-assignments")
     public ResponseEntity<List<CellAssignmentDto>> getAllCellAssignments() {
         return ResponseEntity.ok(templateService.getAllCellAssignments());
+    }
+
+    // ==================== ИСТОРИЯ ИЗМЕНЕНИЙ ====================
+
+    @GetMapping("/events")
+    public ResponseEntity<List<TemplateEventLogDto>> getAllEvents() {
+        return ResponseEntity.ok(templateService.getAllEvents());
+    }
+
+    @GetMapping("/{uid}/events")
+    public ResponseEntity<List<TemplateEventLogDto>> getTemplateEvents(@PathVariable UUID uid) {
+        return ResponseEntity.ok(templateService.getEvents(uid));
     }
 
     // ==================== ДЕРЕВО С НАСТРОЙКАМИ ====================

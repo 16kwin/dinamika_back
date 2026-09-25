@@ -1,4 +1,4 @@
-// TemplateService.java — ПОЛНЫЙ ФАЙЛ (старая иерархия категорий + новая модель ячеек)
+// TemplateService.java — ПОЛНЫЙ ФАЙЛ (с историей изменений шаблона)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -26,6 +26,10 @@ public class TemplateService {
     private final SprMaterialRepository materialRepository;
     private final SprCellAssignmentRepository cellAssignmentRepository;
     private final TemplateColumnSettingsService columnSettingsService;
+
+    // === История ===
+    private final TemplateEventLogRepository templateEventLogRepository;
+    private final UserService userService;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -296,6 +300,8 @@ public class TemplateService {
         DocPattern template = docPatternRepository.findById(templateUid)
                 .orElseThrow(() -> new RuntimeException("Шаблон не найден: " + templateUid));
 
+        String oldCategoryName = template.getCategory() != null ? template.getCategory().getName() : null;
+
         if (newCategoryUid != null) {
             TemplateCategory newCategory = categoryRepository.findByUid(newCategoryUid)
                     .orElseThrow(() -> new RuntimeException("Категория не найдена: " + newCategoryUid));
@@ -305,6 +311,22 @@ public class TemplateService {
         }
 
         docPatternRepository.save(template);
+
+        String newCategoryName = template.getCategory() != null ? template.getCategory().getName() : null;
+
+        logTemplateEvent(
+                template.getUid(),
+                null,
+                "MOVE",
+                "'" + template.getNamePattern() + "': Значение поля 'Категория' изменено с '" +
+                        (oldCategoryName != null ? oldCategoryName : "null") + "' на '" +
+                        (newCategoryName != null ? newCategoryName : "null") + "'",
+                "Категория",
+                oldCategoryName,
+                newCategoryName,
+                "Через карточку"
+        );
+
         return toTemplateDto(template);
     }
 
@@ -353,6 +375,18 @@ public class TemplateService {
         }
 
         docPatternRepository.save(template);
+
+        logTemplateEvent(
+                template.getUid(),
+                null,
+                "CREATE",
+                "Создание шаблона: '" + template.getNamePattern() + "'",
+                null,
+                null,
+                null,
+                "Через карточку"
+        );
+
         return toTemplateDto(template);
     }
 
@@ -362,22 +396,52 @@ public class TemplateService {
                 .orElseThrow(() -> new RuntimeException("Шаблон не найден: " + uid));
 
         if (request.getName() != null) {
-            template.setNamePattern(request.getName());
+            String oldName = template.getNamePattern();
+            if (!Objects.equals(oldName, request.getName())) {
+                logTemplateEvent(template.getUid(), null, "UPDATE",
+                        "'" + oldName + "': Значение поля 'Наименование' изменено с '" + oldName + "' на '" + request.getName() + "'",
+                        "Наименование", oldName, request.getName(), "Через карточку");
+                template.setNamePattern(request.getName());
+            }
         }
         if (request.getConfiguration() != null) {
-            template.setConfiguration(request.getConfiguration());
+            String oldConfig = template.getConfiguration();
+            if (!Objects.equals(oldConfig, request.getConfiguration())) {
+                logTemplateEvent(template.getUid(), null, "UPDATE",
+                        "'" + template.getNamePattern() + "': Значение поля 'Конфигурация' изменено с '" +
+                                (oldConfig != null ? oldConfig : "null") + "' на '" + request.getConfiguration() + "'",
+                        "Конфигурация", oldConfig, request.getConfiguration(), "Через карточку");
+                template.setConfiguration(request.getConfiguration());
+            }
         }
         if (request.getConfigurationUid() != null) {
             StationConfiguration config = configurationRepository.findById(request.getConfigurationUid())
                     .orElseThrow(() -> new RuntimeException("Конфигурация не найдена: " + request.getConfigurationUid()));
-            template.setStationConfiguration(config);
+            UUID oldConfigUid = template.getStationConfiguration() != null ? template.getStationConfiguration().getUid() : null;
+            String oldConfigName = template.getStationConfiguration() != null ? template.getStationConfiguration().getName() : null;
+            if (!Objects.equals(oldConfigUid, config.getUid())) {
+                logTemplateEvent(template.getUid(), null, "UPDATE",
+                        "'" + template.getNamePattern() + "': Значение поля 'Конфигурация станции' изменено с '" +
+                                (oldConfigName != null ? oldConfigName : "null") + "' на '" + config.getName() + "'",
+                        "Конфигурация станции", oldConfigName, config.getName(), "Через карточку");
+                template.setStationConfiguration(config);
+            }
         }
         if (request.getCategoryId() != null) {
             TemplateCategory category = categoryRepository.findById(request.getCategoryId())
                     .orElseThrow(() -> new RuntimeException("Категория не найдена: " + request.getCategoryId()));
-            template.setCategory(category);
+            Long oldCatId = template.getCategory() != null ? template.getCategory().getId() : null;
+            String oldCatName = template.getCategory() != null ? template.getCategory().getName() : null;
+            if (!Objects.equals(oldCatId, category.getId())) {
+                logTemplateEvent(template.getUid(), null, "UPDATE",
+                        "'" + template.getNamePattern() + "': Значение поля 'Категория' изменено с '" +
+                                (oldCatName != null ? oldCatName : "null") + "' на '" + category.getName() + "'",
+                        "Категория", oldCatName, category.getName(), "Через карточку");
+                template.setCategory(category);
+            }
         }
 
+        template.setUpdatedAt(LocalDateTime.now());
         docPatternRepository.save(template);
         return toTemplateDto(template);
     }
@@ -386,6 +450,32 @@ public class TemplateService {
     public void deleteTemplate(UUID uid) {
         DocPattern template = docPatternRepository.findById(uid)
                 .orElseThrow(() -> new RuntimeException("Шаблон не найден: " + uid));
+
+        String name = template.getNamePattern();
+
+        // Логируем ДО удаления — но таблица template_event_log имеет ON DELETE CASCADE,
+        // поэтому запись удалится вместе с шаблоном. Чтобы история сохранилась при
+        // удалении, можно либо не удалять шаблон физически (soft delete), либо
+        // хранить историю вне шаблона.
+        //
+        // Текущая миграция: template_uid REFERENCES doc_pattern(uid) ON DELETE CASCADE —
+        // значит при удалении шаблона история исчезнет.
+        //
+        // Если это нежелательно — надо в миграции поменять на ON DELETE SET NULL
+        // и тогда строка истории останется с template_uid = NULL.
+        // Сейчас пишем событие и полагаемся на то, что если политика CASCADE —
+        // запись удалится вместе с шаблоном (что логично — история мёртвого шаблона не нужна).
+        logTemplateEvent(
+                template.getUid(),
+                null,
+                "DELETE",
+                "Удаление шаблона: '" + name + "'",
+                null,
+                name,
+                null,
+                "Через карточку"
+        );
+
         docPatternRepository.delete(template);
     }
 
@@ -425,7 +515,7 @@ public class TemplateService {
 
         docPatternRepository.save(copy);
 
-        // === Копирование ячеек источника (новая модель) ===
+        // Копирование ячеек
         List<RegCells> sourceCells = regCellsRepository.findByDocPatternUid(source.getUid());
         for (RegCells src : sourceCells) {
             RegCells newCell = new RegCells();
@@ -443,6 +533,19 @@ public class TemplateService {
         }
 
         recalcTemplateStats(copy);
+
+        logTemplateEvent(
+                copy.getUid(),
+                null,
+                "COPY",
+                "Создание копии шаблона: '" + source.getNamePattern() + "' → '" + copy.getNamePattern() +
+                        "' (скопировано ячеек: " + sourceCells.size() + ")",
+                null,
+                source.getNamePattern(),
+                copy.getNamePattern(),
+                "Копирование шаблона"
+        );
+
         return toTemplateDto(copy);
     }
 
@@ -453,36 +556,190 @@ public class TemplateService {
         DocPattern template = docPatternRepository.findById(templateUid)
                 .orElseThrow(() -> new RuntimeException("Шаблон не найден: " + templateUid));
 
-        regCellsRepository.deleteByDocPatternUid(templateUid);
+        // 1. Снимок старого состояния
+        List<RegCells> oldCells = regCellsRepository.findByDocPatternUid(templateUid);
+        Map<String, RegCells> oldMap = new HashMap<>();
+        for (RegCells c : oldCells) {
+            oldMap.put(cellKey(c.getDrumNumber(), c.getColumnNumber(), c.getNumberCell()), c);
+        }
 
-        if (request.getCells() != null) {
-            for (SaveBatchCellsRequest.BatchCellItem item : request.getCells()) {
-                RegCells cell = new RegCells();
-                cell.setUid(UUID.randomUUID());
-                cell.setDocPattern(template);
-                cell.setNumberCell(item.getNumberCell());
-                cell.setColumnNumber(item.getColumnNumber());
-                cell.setDrumNumber(item.getDrumNumber());
-                cell.setQuantity(item.getQuantity());
-                cell.setReturnToThisCell(item.getReturnToThisCell() != null ? item.getReturnToThisCell() : false);
-                cell.setIsIndividual(item.getIsIndividual() != null ? item.getIsIndividual() : false);
+        // 2. Индексируем новый набор
+        List<SaveBatchCellsRequest.BatchCellItem> newItems = request.getCells() != null
+                ? request.getCells() : Collections.emptyList();
+        Set<String> newKeys = new HashSet<>();
 
-                if (item.getCellAssignmentUid() != null) {
-                    SprCellAssignment assignment = cellAssignmentRepository.findById(item.getCellAssignmentUid())
-                            .orElseThrow(() -> new RuntimeException("Назначение не найдено: " + item.getCellAssignmentUid()));
-                    cell.setCellAssignment(assignment);
+        // 3. Собираем diff — до фактического удаления/вставки
+        List<String> diffs = new ArrayList<>();
+        int createdCount = 0;
+        int updatedCount = 0;
+        int deletedCount = 0;
+
+        Map<String, SaveBatchCellsRequest.BatchCellItem> newMap = new HashMap<>();
+        for (SaveBatchCellsRequest.BatchCellItem item : newItems) {
+            String key = cellKey(item.getDrumNumber(), item.getColumnNumber(), item.getNumberCell());
+            newMap.put(key, item);
+            newKeys.add(key);
+        }
+
+        // Изменённые или созданные
+        for (Map.Entry<String, SaveBatchCellsRequest.BatchCellItem> e : newMap.entrySet()) {
+            String key = e.getKey();
+            SaveBatchCellsRequest.BatchCellItem ni = e.getValue();
+            RegCells old = oldMap.get(key);
+
+            String cellLabel = formatCellLabel(ni.getDrumNumber(), ni.getColumnNumber(), ni.getNumberCell());
+
+            if (old == null) {
+                createdCount++;
+                diffs.add("Создана ячейка " + cellLabel);
+                continue;
+            }
+
+            // Сравниваем поля
+            String oldAssignUid = old.getCellAssignment() != null ? old.getCellAssignment().getUid().toString() : null;
+            String newAssignUid = ni.getCellAssignmentUid() != null ? ni.getCellAssignmentUid().toString() : null;
+            if (!Objects.equals(oldAssignUid, newAssignUid)) {
+                String oldName = old.getCellAssignment() != null ? old.getCellAssignment().getName() : null;
+                String newName = null;
+                if (ni.getCellAssignmentUid() != null) {
+                    SprCellAssignment a = cellAssignmentRepository.findById(ni.getCellAssignmentUid()).orElse(null);
+                    newName = a != null ? a.getName() : null;
                 }
-                if (item.getMaterialUid() != null) {
-                    SprMaterial material = materialRepository.findById(item.getMaterialUid())
-                            .orElseThrow(() -> new RuntimeException("Материал не найден: " + item.getMaterialUid()));
-                    cell.setMaterial(material);
-                }
+                updatedCount++;
+                diffs.add("Ячейка " + cellLabel + ": Назначение '" + (oldName != null ? oldName : "—") + "' → '" + (newName != null ? newName : "—") + "'");
+            }
 
-                regCellsRepository.save(cell);
+            String oldMatUid = old.getMaterial() != null ? old.getMaterial().getUid().toString() : null;
+            String newMatUid = ni.getMaterialUid() != null ? ni.getMaterialUid().toString() : null;
+            if (!Objects.equals(oldMatUid, newMatUid)) {
+                String oldName = old.getMaterial() != null ? old.getMaterial().getNameMaterial() : null;
+                String newName = null;
+                if (ni.getMaterialUid() != null) {
+                    SprMaterial m = materialRepository.findById(ni.getMaterialUid()).orElse(null);
+                    newName = m != null ? m.getNameMaterial() : null;
+                }
+                updatedCount++;
+                diffs.add("Ячейка " + cellLabel + ": Номенклатура '" + (oldName != null ? oldName : "—") + "' → '" + (newName != null ? newName : "—") + "'");
+            }
+
+            if (!Objects.equals(old.getQuantity(), ni.getQuantity())) {
+                updatedCount++;
+                diffs.add("Ячейка " + cellLabel + ": Количество " + (old.getQuantity() != null ? old.getQuantity() : "—") + " → " + (ni.getQuantity() != null ? ni.getQuantity() : "—"));
+            }
+
+            boolean oldReturn = old.getReturnToThisCell() != null && old.getReturnToThisCell();
+            boolean newReturn = ni.getReturnToThisCell() != null && ni.getReturnToThisCell();
+            if (oldReturn != newReturn) {
+                updatedCount++;
+                diffs.add("Ячейка " + cellLabel + ": Возврат в ячейку " + (oldReturn ? "Да" : "Нет") + " → " + (newReturn ? "Да" : "Нет"));
+            }
+
+            boolean oldInd = old.getIsIndividual() != null && old.getIsIndividual();
+            boolean newInd = ni.getIsIndividual() != null && ni.getIsIndividual();
+            if (oldInd != newInd) {
+                updatedCount++;
+                diffs.add("Ячейка " + cellLabel + ": Индивидуальная " + (oldInd ? "Да" : "Нет") + " → " + (newInd ? "Да" : "Нет"));
             }
         }
 
+        // Удалённые
+        for (String oldKey : oldMap.keySet()) {
+            if (!newKeys.contains(oldKey)) {
+                RegCells old = oldMap.get(oldKey);
+                deletedCount++;
+                String cellLabel = formatCellLabel(old.getDrumNumber(), old.getColumnNumber(), old.getNumberCell());
+                diffs.add("Удалена ячейка " + cellLabel);
+            }
+        }
+
+        // 4. Фактическая запись
+        regCellsRepository.deleteByDocPatternUid(templateUid);
+
+        for (SaveBatchCellsRequest.BatchCellItem item : newItems) {
+            RegCells cell = new RegCells();
+            cell.setUid(UUID.randomUUID());
+            cell.setDocPattern(template);
+            cell.setNumberCell(item.getNumberCell());
+            cell.setColumnNumber(item.getColumnNumber());
+            cell.setDrumNumber(item.getDrumNumber());
+            cell.setQuantity(item.getQuantity());
+            cell.setReturnToThisCell(item.getReturnToThisCell() != null ? item.getReturnToThisCell() : false);
+            cell.setIsIndividual(item.getIsIndividual() != null ? item.getIsIndividual() : false);
+
+            if (item.getCellAssignmentUid() != null) {
+                SprCellAssignment assignment = cellAssignmentRepository.findById(item.getCellAssignmentUid())
+                        .orElseThrow(() -> new RuntimeException("Назначение не найдено: " + item.getCellAssignmentUid()));
+                cell.setCellAssignment(assignment);
+            }
+            if (item.getMaterialUid() != null) {
+                SprMaterial material = materialRepository.findById(item.getMaterialUid())
+                        .orElseThrow(() -> new RuntimeException("Материал не найден: " + item.getMaterialUid()));
+                cell.setMaterial(material);
+            }
+
+            regCellsRepository.save(cell);
+        }
+
         recalcTemplateStats(template);
+
+        // 5. Логируем одним событием BATCH_SAVE + детализацию
+        if (createdCount > 0 || updatedCount > 0 || deletedCount > 0) {
+            String summary = String.format(
+                    "Массовое сохранение ячеек шаблона '%s': создано %d, изменено %d, удалено %d",
+                    template.getNamePattern(), createdCount, updatedCount, deletedCount
+            );
+
+            logTemplateEvent(
+                    templateUid,
+                    null,
+                    "BATCH_SAVE",
+                    summary,
+                    null,
+                    null,
+                    null,
+                    "Массовое сохранение"
+            );
+
+            // Детальные строки — по одной на изменение, но не более N (например, 200),
+            // чтобы не раздувать историю. Остальное — сводка.
+            int limit = Math.min(diffs.size(), 200);
+            for (int i = 0; i < limit; i++) {
+                logTemplateEvent(
+                        templateUid,
+                        null,
+                        "BATCH_ITEM",
+                        diffs.get(i),
+                        null,
+                        null,
+                        null,
+                        "Массовое сохранение"
+                );
+            }
+            if (diffs.size() > limit) {
+                logTemplateEvent(
+                        templateUid,
+                        null,
+                        "BATCH_ITEM",
+                        "… и ещё " + (diffs.size() - limit) + " изменений (сокращено)",
+                        null,
+                        null,
+                        null,
+                        "Массовое сохранение"
+                );
+            }
+        }
+    }
+
+    private String cellKey(Integer drum, Integer column, Integer number) {
+        return (drum != null ? drum : 0) + "-" + (column != null ? column : 0) + "-" + (number != null ? number : 0);
+    }
+
+    private String formatCellLabel(Integer drum, Integer column, Integer number) {
+        StringBuilder sb = new StringBuilder();
+        if (drum != null) sb.append("Барабан ").append(drum).append(", ");
+        if (column != null) sb.append("Колонка ").append(column).append(", ");
+        if (number != null) sb.append("Ячейка ").append(number);
+        return sb.length() > 0 ? sb.toString() : "—";
     }
 
     // ==================== НАЗНАЧЕНИЯ ЯЧЕЕК (справочник) ====================
@@ -544,6 +801,17 @@ public class TemplateService {
         regCellsRepository.save(cell);
         recalcTemplateStats(template);
 
+        logTemplateEvent(
+                template.getUid(),
+                cell.getUid(),
+                "CREATE",
+                "Создание ячейки " + formatCellLabel(cell.getDrumNumber(), cell.getColumnNumber(), cell.getNumberCell()),
+                null,
+                null,
+                null,
+                "Через карточку"
+        );
+
         return toCellDto(cell);
     }
 
@@ -552,33 +820,80 @@ public class TemplateService {
         RegCells cell = regCellsRepository.findById(cellUid)
                 .orElseThrow(() -> new RuntimeException("Ячейка не найдена: " + cellUid));
 
-        if (request.getCellAssignmentUid() != null) {
-            SprCellAssignment assignment = cellAssignmentRepository.findById(request.getCellAssignmentUid())
-                    .orElseThrow(() -> new RuntimeException("Назначение не найдено: " + request.getCellAssignmentUid()));
-            cell.setCellAssignment(assignment);
+        DocPattern template = cell.getDocPattern();
+        String cellLabel = formatCellLabel(cell.getDrumNumber(), cell.getColumnNumber(), cell.getNumberCell());
+
+        // === Назначение ===
+        String oldAssignUid = cell.getCellAssignment() != null ? cell.getCellAssignment().getUid().toString() : null;
+        String newAssignUid = request.getCellAssignmentUid() != null ? request.getCellAssignmentUid().toString() : null;
+        if (!Objects.equals(oldAssignUid, newAssignUid)) {
+            String oldName = cell.getCellAssignment() != null ? cell.getCellAssignment().getName() : null;
+            SprCellAssignment newAssign = null;
+            if (request.getCellAssignmentUid() != null) {
+                newAssign = cellAssignmentRepository.findById(request.getCellAssignmentUid())
+                        .orElseThrow(() -> new RuntimeException("Назначение не найдено: " + request.getCellAssignmentUid()));
+            }
+            logTemplateEvent(template.getUid(), cell.getUid(), "UPDATE",
+                    "Ячейка " + cellLabel + ": Назначение '" + (oldName != null ? oldName : "—") + "' → '" + (newAssign != null ? newAssign.getName() : "—") + "'",
+                    "Назначение", oldName, newAssign != null ? newAssign.getName() : null, "Через карточку");
+            cell.setCellAssignment(newAssign);
         } else {
-            cell.setCellAssignment(null);
+            cell.setCellAssignment(cell.getCellAssignment());
         }
 
-        if (request.getMaterialUid() != null) {
-            SprMaterial material = materialRepository.findById(request.getMaterialUid())
-                    .orElseThrow(() -> new RuntimeException("Материал не найден: " + request.getMaterialUid()));
-            cell.setMaterial(material);
-        } else {
-            cell.setMaterial(null);
+        // === Материал ===
+        String oldMatUid = cell.getMaterial() != null ? cell.getMaterial().getUid().toString() : null;
+        String newMatUid = request.getMaterialUid() != null ? request.getMaterialUid().toString() : null;
+        if (!Objects.equals(oldMatUid, newMatUid)) {
+            String oldName = cell.getMaterial() != null ? cell.getMaterial().getNameMaterial() : null;
+            SprMaterial newMat = null;
+            if (request.getMaterialUid() != null) {
+                newMat = materialRepository.findById(request.getMaterialUid())
+                        .orElseThrow(() -> new RuntimeException("Материал не найден: " + request.getMaterialUid()));
+            }
+            logTemplateEvent(template.getUid(), cell.getUid(), "UPDATE",
+                    "Ячейка " + cellLabel + ": Номенклатура '" + (oldName != null ? oldName : "—") + "' → '" + (newMat != null ? newMat.getNameMaterial() : "—") + "'",
+                    "Номенклатура", oldName, newMat != null ? newMat.getNameMaterial() : null, "Через карточку");
+            cell.setMaterial(newMat);
         }
 
-        cell.setQuantity(request.getQuantity());
+        // === Количество ===
+        if (!Objects.equals(cell.getQuantity(), request.getQuantity())) {
+            logTemplateEvent(template.getUid(), cell.getUid(), "UPDATE",
+                    "Ячейка " + cellLabel + ": Количество " + (cell.getQuantity() != null ? cell.getQuantity() : "—") + " → " + (request.getQuantity() != null ? request.getQuantity() : "—"),
+                    "Количество",
+                    cell.getQuantity() != null ? String.valueOf(cell.getQuantity()) : null,
+                    request.getQuantity() != null ? String.valueOf(request.getQuantity()) : null,
+                    "Через карточку");
+            cell.setQuantity(request.getQuantity());
+        }
 
+        // === Возврат в ячейку ===
         if (request.getReturnToThisCell() != null) {
+            boolean oldV = cell.getReturnToThisCell() != null && cell.getReturnToThisCell();
+            boolean newV = request.getReturnToThisCell();
+            if (oldV != newV) {
+                logTemplateEvent(template.getUid(), cell.getUid(), "UPDATE",
+                        "Ячейка " + cellLabel + ": Возврат в ячейку " + (oldV ? "Да" : "Нет") + " → " + (newV ? "Да" : "Нет"),
+                        "Возврат в ячейку", oldV ? "Да" : "Нет", newV ? "Да" : "Нет", "Через карточку");
+            }
             cell.setReturnToThisCell(request.getReturnToThisCell());
         }
+
+        // === Индивидуальная ячейка ===
         if (request.getIsIndividual() != null) {
+            boolean oldV = cell.getIsIndividual() != null && cell.getIsIndividual();
+            boolean newV = request.getIsIndividual();
+            if (oldV != newV) {
+                logTemplateEvent(template.getUid(), cell.getUid(), "UPDATE",
+                        "Ячейка " + cellLabel + ": Индивидуальная " + (oldV ? "Да" : "Нет") + " → " + (newV ? "Да" : "Нет"),
+                        "Индивидуальная ячейка", oldV ? "Да" : "Нет", newV ? "Да" : "Нет", "Через карточку");
+            }
             cell.setIsIndividual(request.getIsIndividual());
         }
 
         regCellsRepository.save(cell);
-        recalcTemplateStats(cell.getDocPattern());
+        recalcTemplateStats(template);
 
         return toCellDto(cell);
     }
@@ -589,9 +904,30 @@ public class TemplateService {
                 .orElseThrow(() -> new RuntimeException("Ячейка не найдена: " + cellUid));
 
         DocPattern template = cell.getDocPattern();
+        String cellLabel = formatCellLabel(cell.getDrumNumber(), cell.getColumnNumber(), cell.getNumberCell());
+
+        // Снимок для истории
+        String oldAssignName = cell.getCellAssignment() != null ? cell.getCellAssignment().getName() : null;
+        String oldMatName = cell.getMaterial() != null ? cell.getMaterial().getNameMaterial() : null;
+        Integer oldQty = cell.getQuantity();
+
         cell.clear();
         regCellsRepository.save(cell);
         recalcTemplateStats(template);
+
+        logTemplateEvent(
+                template.getUid(),
+                cell.getUid(),
+                "CLEAR",
+                "Очистка ячейки " + cellLabel +
+                        " (было: Назначение='" + (oldAssignName != null ? oldAssignName : "—") +
+                        "', Номенклатура='" + (oldMatName != null ? oldMatName : "—") +
+                        "', Количество=" + (oldQty != null ? oldQty : "—") + ")",
+                null,
+                null,
+                null,
+                "Через карточку"
+        );
     }
 
     @Transactional
@@ -603,7 +939,26 @@ public class TemplateService {
             if (template == null) {
                 template = cell.getDocPattern();
             }
+            String cellLabel = formatCellLabel(cell.getDrumNumber(), cell.getColumnNumber(), cell.getNumberCell());
+
+            String oldAssignName = cell.getCellAssignment() != null ? cell.getCellAssignment().getName() : null;
+            String oldMatName = cell.getMaterial() != null ? cell.getMaterial().getNameMaterial() : null;
+
             cell.clear();
+            regCellsRepository.save(cell);
+
+            logTemplateEvent(
+                    cell.getDocPattern().getUid(),
+                    cell.getUid(),
+                    "CLEAR",
+                    "Массовая очистка ячейки " + cellLabel +
+                            " (было: Назначение='" + (oldAssignName != null ? oldAssignName : "—") +
+                            "', Номенклатура='" + (oldMatName != null ? oldMatName : "—") + "')",
+                    null,
+                    null,
+                    null,
+                    "Через карточку"
+            );
         }
 
         regCellsRepository.saveAll(cells);
@@ -619,6 +974,66 @@ public class TemplateService {
         template.setFilledCells((int) filled);
         template.setFreeCells(template.getTotalCells() - (int) filled);
         docPatternRepository.save(template);
+    }
+
+    // ==================== ИСТОРИЯ ИЗМЕНЕНИЙ ====================
+
+    public List<TemplateEventLogDto> getEvents(UUID templateUid) {
+        return templateEventLogRepository
+                .findByTemplateUidOrderByCreatedAtDesc(templateUid)
+                .stream()
+                .map(this::toEventDto)
+                .collect(Collectors.toList());
+    }
+
+    public List<TemplateEventLogDto> getAllEvents() {
+        return templateEventLogRepository
+                .findAllByOrderByCreatedAtDesc()
+                .stream()
+                .map(this::toEventDto)
+                .collect(Collectors.toList());
+    }
+
+    private void logTemplateEvent(
+            UUID templateUid,
+            UUID cellUid,
+            String eventType,
+            String description,
+            String fieldName,
+            String oldValue,
+            String newValue,
+            String source
+    ) {
+        TemplateEventLog log = TemplateEventLog.builder()
+                .uid(UUID.randomUUID())
+                .templateUid(templateUid)
+                .cellUid(cellUid)
+                .eventType(eventType)
+                .eventDescription(description)
+                .fieldName(fieldName)
+                .oldValue(oldValue)
+                .newValue(newValue)
+                .author(userService.getCurrentUsername())
+                .source(source != null ? source : "Через карточку")
+                .createdAt(LocalDateTime.now())
+                .build();
+        templateEventLogRepository.save(log);
+    }
+
+    private TemplateEventLogDto toEventDto(TemplateEventLog e) {
+        return TemplateEventLogDto.builder()
+                .uid(e.getUid())
+                .templateUid(e.getTemplateUid())
+                .cellUid(e.getCellUid())
+                .eventType(e.getEventType())
+                .eventDescription(e.getEventDescription())
+                .fieldName(e.getFieldName())
+                .oldValue(e.getOldValue())
+                .newValue(e.getNewValue())
+                .author(e.getAuthor())
+                .source(e.getSource())
+                .createdAt(e.getCreatedAt())
+                .build();
     }
 
     // ==================== МАППИНГ ====================
