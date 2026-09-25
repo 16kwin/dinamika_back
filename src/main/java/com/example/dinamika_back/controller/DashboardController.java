@@ -1,10 +1,18 @@
 package com.example.dinamika_back.controller;
 
+import com.example.dinamika_back.dto.DashboardAuditResponse;
+import com.example.dinamika_back.dto.DashboardControlEventsResponse;
+import com.example.dinamika_back.dto.DashboardDayEventsResponse;
 import com.example.dinamika_back.dto.DashboardEconomicResponse;
 import com.example.dinamika_back.dto.DashboardOperatorResponse;
+import com.example.dinamika_back.dto.DashboardPurchaseGraphResponse;
 import com.example.dinamika_back.dto.DashboardQualityResponse;
 import com.example.dinamika_back.dto.DashboardSettingsDTO;
+import com.example.dinamika_back.service.DashboardAuditService;
+import com.example.dinamika_back.service.DashboardControlEventService;
+import com.example.dinamika_back.service.DashboardDayEventService;
 import com.example.dinamika_back.service.DashboardOperatorService;
+import com.example.dinamika_back.service.DashboardPurchaseGraphService;
 import com.example.dinamika_back.service.DashboardQualityService;
 import com.example.dinamika_back.service.DashboardService;
 import lombok.RequiredArgsConstructor;
@@ -18,8 +26,9 @@ import java.time.format.DateTimeParseException;
 import java.util.Map;
 
 /**
- * Информационные панели главной страницы: «Экономический блок», «Показатели» и «Оператор склада»
- * (permitAll, см. SecurityConfig).
+ * Информационные панели главной страницы: «Экономический блок», «Показатели», «Оператор склада»,
+ * панели ролей «Контролер», «Главный контролер», «Начальник цеха», «Служба закупа», «Аудитор»
+ * и отдельные экраны «Граф закупок» и «Экран событий текущего дня» (permitAll, см. SecurityConfig).
  */
 @RestController
 @RequestMapping("/api/dashboard")
@@ -29,6 +38,10 @@ public class DashboardController {
     private final DashboardService dashboardService;
     private final DashboardQualityService dashboardQualityService;
     private final DashboardOperatorService dashboardOperatorService;
+    private final DashboardPurchaseGraphService dashboardPurchaseGraphService;
+    private final DashboardAuditService dashboardAuditService;
+    private final DashboardControlEventService dashboardControlEventService;
+    private final DashboardDayEventService dashboardDayEventService;
 
     // ==================== Данные панели ====================
 
@@ -63,6 +76,49 @@ public class DashboardController {
     @GetMapping("/operator")
     public ResponseEntity<DashboardOperatorResponse> getOperator() {
         return ResponseEntity.ok(dashboardOperatorService.getOperator());
+    }
+
+    /**
+     * «Граф закупок» (панель «Служба закупа» и отдельный экран): справочники номенклатуры и поставщиков,
+     * закупки за период по парам номенклатура × поставщик и связи поставщиков
+     */
+    @GetMapping("/purchase-graph")
+    public ResponseEntity<DashboardPurchaseGraphResponse> getPurchaseGraph(
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        LocalDate dateFrom = parseDate("from", from);
+        LocalDate dateTo = parseDate("to", to);
+        if (dateFrom.isAfter(dateTo)) {
+            throw new IllegalArgumentException("Дата from не может быть позже даты to");
+        }
+        return ResponseEntity.ok(dashboardPurchaseGraphService.getPurchaseGraph(dateFrom, dateTo));
+    }
+
+    /** Панель «Аудитор»: инциденты и выдачи сверх нормы за период, лента закупок с завышенной ценой */
+    @GetMapping("/audit")
+    public ResponseEntity<DashboardAuditResponse> getAudit(
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        LocalDate dateFrom = parseDate("from", from);
+        LocalDate dateTo = parseDate("to", to);
+        if (dateFrom.isAfter(dateTo)) {
+            throw new IllegalArgumentException("Дата from не может быть позже даты to");
+        }
+        return ResponseEntity.ok(dashboardAuditService.getAudit(dateFrom, dateTo));
+    }
+
+    /** Лента контроля качества: scope=section — участок контролёра (по умолчанию), enterprise — предприятие */
+    @GetMapping("/control-events")
+    public ResponseEntity<DashboardControlEventsResponse> getControlEvents(
+            @RequestParam(required = false) String scope) {
+        return ResponseEntity.ok(dashboardControlEventService.getControlEvents(scope));
+    }
+
+    /** «Экран событий текущего дня»: source = operator (по умолчанию) | control | release | overpriced */
+    @GetMapping("/day-events")
+    public ResponseEntity<DashboardDayEventsResponse> getDayEvents(
+            @RequestParam(required = false) String source) {
+        return ResponseEntity.ok(dashboardDayEventService.getDayEvents(source));
     }
 
     // ==================== Settings ====================
