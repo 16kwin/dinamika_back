@@ -1,3 +1,4 @@
+// TemplateCategory.java
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
@@ -17,6 +18,7 @@ public class TemplateCategory {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id")
     private Long id;
 
     @Column(name = "uid", nullable = false, unique = true)
@@ -25,7 +27,14 @@ public class TemplateCategory {
     @Column(name = "name", nullable = false, unique = true)
     private String name;
 
-    @Column(name = "created_at", updatable = false)
+    @Column(name = "code")
+    private Integer code;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_category_id")
+    private TemplateCategory parentCategory;
+
+    @Column(name = "created_at")
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at")

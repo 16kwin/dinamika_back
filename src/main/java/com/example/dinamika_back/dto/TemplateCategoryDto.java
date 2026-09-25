@@ -1,22 +1,28 @@
-// dto/TemplateCategoryDto.java
+// TemplateCategoryDto.java
 package com.example.dinamika_back.dto;
 
-import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
-import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Data
 @Builder
-@NoArgsConstructor
-@AllArgsConstructor
 public class TemplateCategoryDto {
     private Long id;
     private UUID uid;
     private String name;
+    private Integer code;
+
+    private Long parentCategoryId;
+    private UUID parentCategoryUid;
+    private String parentCategoryName;
+
+    private List<TemplateCategoryDto> children;
+    private List<TemplateDto> templates;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
