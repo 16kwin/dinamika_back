@@ -29,16 +29,20 @@ public class StockRegisterService {
     private final StockEventLogRepository eventLogRepository;
     private final SprMaterialRepository materialRepository;
     private final StationRepository stationRepository;
+    private final StockMovementRepository stockMovementRepository;
+    private final DocTransferRepository docTransferRepository;
+    private final DocRefillRepository docRefillRepository;
 
     // ==================== ИНИЦИАЛИЗАЦИЯ ====================
 
+    /** Возвращает последнее состояние остатка по паре (material, stock) — или создаёт новое. */
     @Transactional
     public RegStockBalance ensureBalance(UUID materialUid, String stockUid) {
         String effectiveStock = (stockUid == null || stockUid.isBlank()) ? MAIN_STOCK : stockUid;
 
-        Optional<RegStockBalance> existing =
-                balanceRepository.findByMaterialUidAndStockUid(materialUid, effectiveStock);
-        if (existing.isPresent()) return existing.get();
+        Optional<RegStockBalance> last =
+                balanceRepository.findTopByMaterialUidAndStockUidOrderByCreatedAtDesc(materialUid, effectiveStock);
+        if (last.isPresent()) return last.get();
 
         SprMaterial material = materialRepository.findById(materialUid)
                 .orElseThrow(() -> new RuntimeException("Номенклатура не найдена: " + materialUid));
@@ -52,14 +56,7 @@ public class StockRegisterService {
                 .criticalStock(DEFAULT_CRITICAL_STOCK)
                 .build();
 
-        RegStockBalance saved;
-        try {
-            saved = balanceRepository.saveAndFlush(balance);
-        } catch (org.springframework.dao.DataIntegrityViolationException e) {
-            saved = balanceRepository.findByMaterialUidAndStockUid(materialUid, effectiveStock)
-                    .orElseThrow(() -> e);
-            return saved;
-        }
+        RegStockBalance saved = balanceRepository.saveAndFlush(balance);
 
         logStockEvent(
                 saved.getUid(), null, materialUid, null,
@@ -71,6 +68,37 @@ public class StockRegisterService {
         );
 
         return saved;
+    }
+
+    /** Вставка новой записи состояния по паре (material, stock) с новыми clean/reserved. */
+    private RegStockBalance pushNewBalance(RegStockBalance previous,
+                                           int newClean,
+                                           int newReserved,
+                                           UUID materialUid,
+                                           String stockUid) {
+        SprMaterial material = previous != null
+                ? previous.getMaterial()
+                : materialRepository.findById(materialUid)
+                        .orElseThrow(() -> new RuntimeException("Номенклатура не найдена: " + materialUid));
+
+        Integer minStock = previous != null ? previous.getMinStock() : DEFAULT_MIN_STOCK;
+        Integer criticalStock = previous != null ? previous.getCriticalStock() : DEFAULT_CRITICAL_STOCK;
+
+        RegStockBalance next = RegStockBalance.builder()
+                .material(material)
+                .stockUid(stockUid)
+                .cleanQuantity(newClean)
+                .reservedQuantity(Math.max(0, newReserved))
+                .minStock(minStock)
+                .criticalStock(criticalStock)
+                .build();
+
+        return balanceRepository.save(next);
+    }
+
+    private RegStockBalance getLastBalance(UUID materialUid, String stockUid) {
+        return balanceRepository.findTopByMaterialUidAndStockUidOrderByCreatedAtDesc(materialUid, stockUid)
+                .orElse(null);
     }
 
     // ==================== БРОНИРОВАНИЕ ====================
@@ -88,39 +116,46 @@ public class StockRegisterService {
             if (qty <= 0) continue;
             grouped.merge(item.getMaterialUid(), qty, Integer::sum);
         }
-
         if (grouped.isEmpty()) return;
 
         for (Map.Entry<UUID, Integer> entry : grouped.entrySet()) {
-            UUID materialUid = entry.getKey();
-            int qty = entry.getValue();
-
-            RegStockBalance balance = ensureBalance(materialUid, effectiveStock);
-
-            RegStockReservation reservation = RegStockReservation.builder()
-                    .docRefill(DocRefill.builder().uid(docRefillUid).build())
-                    .material(balance.getMaterial())
-                    .stockUid(effectiveStock)
-                    .reservedQuantity(qty)
-                    .blocked(false)
-                    .build();
-            RegStockReservation savedRes = reservationRepository.save(reservation);
-
-            int cleanBefore = balance.getCleanQuantity() != null ? balance.getCleanQuantity() : 0;
-            int reservedBefore = balance.getReservedQuantity() != null ? balance.getReservedQuantity() : 0;
-
-            balance.setCleanQuantity(cleanBefore - qty);
-            balance.setReservedQuantity(reservedBefore + qty);
-            balanceRepository.save(balance);
-
-            logStockEvent(
-                    balance.getUid(), savedRes.getUid(), materialUid, docRefillUid,
-                    "RESERVE",
-                    "Забронировано " + qty + " ед. под документ пополнения",
-                    "cleanQuantity", String.valueOf(cleanBefore), String.valueOf(cleanBefore - qty),
-                    author
-            );
+            reserveOne(docRefillUid, entry.getKey(), entry.getValue(), effectiveStock, author);
         }
+    }
+
+    private void reserveOne(UUID docRefillUid, UUID materialUid, int qty, String stockUid, String author) {
+        if (qty <= 0) return;
+
+        RegStockBalance previous = ensureBalance(materialUid, stockUid);
+
+        int cleanBefore = previous.getCleanQuantity() != null ? previous.getCleanQuantity() : 0;
+        int reservedBefore = previous.getReservedQuantity() != null ? previous.getReservedQuantity() : 0;
+        int cleanAfter = cleanBefore - qty;
+        int reservedAfter = reservedBefore + qty;
+
+        // 1) детальная запись брони
+        RegStockReservation reservation = RegStockReservation.builder()
+                .docRefill(DocRefill.builder().uid(docRefillUid).build())
+                .material(previous.getMaterial())
+                .stockUid(stockUid)
+                .reservedQuantity(qty)
+                .blocked(false)
+                .build();
+        RegStockReservation savedRes = reservationRepository.save(reservation);
+
+        // 2) НОВАЯ строка состояния (не update)
+        RegStockBalance next = pushNewBalance(previous, cleanAfter, reservedAfter, materialUid, stockUid);
+
+        // 3) НОВАЯ запись движения (DRAFT) — REFILL, списание с MAIN
+        createRefillMovementDraft(docRefillUid, materialUid, stockUid, qty, author);
+
+        logStockEvent(
+                next.getUid(), savedRes.getUid(), materialUid, docRefillUid,
+                "RESERVE",
+                "Забронировано " + qty + " ед. под документ пополнения",
+                "cleanQuantity", String.valueOf(cleanBefore), String.valueOf(cleanAfter),
+                author
+        );
     }
 
     // ==================== СНЯТИЕ БРОНИ ====================
@@ -134,33 +169,42 @@ public class StockRegisterService {
 
         for (RegStockReservation r : reservations) {
             if (Boolean.TRUE.equals(r.getBlocked())) continue;
-
-            String stockUid = r.getStockUid() != null ? r.getStockUid() : MAIN_STOCK;
-            UUID materialUid = r.getMaterial().getUid();
-            int qty = r.getReservedQuantity() != null ? r.getReservedQuantity() : 0;
-
-            balanceRepository.findByMaterialUidAndStockUid(materialUid, stockUid).ifPresent(balance -> {
-                int cleanBefore = balance.getCleanQuantity() != null ? balance.getCleanQuantity() : 0;
-                int reservedBefore = balance.getReservedQuantity() != null ? balance.getReservedQuantity() : 0;
-
-                balance.setCleanQuantity(cleanBefore + qty);
-                balance.setReservedQuantity(Math.max(0, reservedBefore - qty));
-                balanceRepository.save(balance);
-
-                logStockEvent(
-                        balance.getUid(), r.getUid(), materialUid, docRefillUid,
-                        "RELEASE",
-                        "Снята бронь " + qty + " ед.",
-                        "cleanQuantity", String.valueOf(cleanBefore), String.valueOf(cleanBefore + qty),
-                        author
-                );
-            });
+            releaseOne(r, author);
         }
 
         reservationRepository.deleteActiveByDocRefillUid(docRefillUid);
+
+        // Удаляем DRAFT-движения документа
+        stockMovementRepository.deleteDraftByDocUid(docRefillUid);
     }
 
-    // ==================== ПРАВКА ДОКУМЕНТА (только diff) ====================
+    private void releaseOne(RegStockReservation r, String author) {
+        if (r == null || Boolean.TRUE.equals(r.getBlocked())) return;
+        String stockUid = r.getStockUid() != null ? r.getStockUid() : MAIN_STOCK;
+        UUID materialUid = r.getMaterial().getUid();
+        int qty = r.getReservedQuantity() != null ? r.getReservedQuantity() : 0;
+
+        RegStockBalance previous = getLastBalance(materialUid, stockUid);
+        if (previous == null) return;
+
+        int cleanBefore = previous.getCleanQuantity() != null ? previous.getCleanQuantity() : 0;
+        int reservedBefore = previous.getReservedQuantity() != null ? previous.getReservedQuantity() : 0;
+        int cleanAfter = cleanBefore + qty;
+        int reservedAfter = Math.max(0, reservedBefore - qty);
+
+        RegStockBalance next = pushNewBalance(previous, cleanAfter, reservedAfter, materialUid, stockUid);
+
+        logStockEvent(
+                next.getUid(), r.getUid(), materialUid,
+                r.getDocRefill() != null ? r.getDocRefill().getUid() : null,
+                "RELEASE",
+                "Снята бронь " + qty + " ед.",
+                "cleanQuantity", String.valueOf(cleanBefore), String.valueOf(cleanAfter),
+                author
+        );
+    }
+
+    // ==================== ПРАВКА ДОКУМЕНТА (diff) ====================
 
     @Transactional
     public void rebuildForDoc(UUID docRefillUid, String stockUid, List<StockReserveItem> items, String author) {
@@ -214,59 +258,6 @@ public class StockRegisterService {
         }
     }
 
-    private void reserveOne(UUID docRefillUid, UUID materialUid, int qty, String stockUid, String author) {
-        if (qty <= 0) return;
-        RegStockBalance balance = ensureBalance(materialUid, stockUid);
-
-        RegStockReservation reservation = RegStockReservation.builder()
-                .docRefill(DocRefill.builder().uid(docRefillUid).build())
-                .material(balance.getMaterial())
-                .stockUid(stockUid)
-                .reservedQuantity(qty)
-                .blocked(false)
-                .build();
-        RegStockReservation savedRes = reservationRepository.save(reservation);
-
-        int cleanBefore = balance.getCleanQuantity() != null ? balance.getCleanQuantity() : 0;
-        int reservedBefore = balance.getReservedQuantity() != null ? balance.getReservedQuantity() : 0;
-
-        balance.setCleanQuantity(cleanBefore - qty);
-        balance.setReservedQuantity(reservedBefore + qty);
-        balanceRepository.save(balance);
-
-        logStockEvent(
-                balance.getUid(), savedRes.getUid(), materialUid, docRefillUid,
-                "RESERVE",
-                "Забронировано " + qty + " ед. под документ пополнения",
-                "cleanQuantity", String.valueOf(cleanBefore), String.valueOf(cleanBefore - qty),
-                author
-        );
-    }
-
-    private void releaseOne(RegStockReservation r, String author) {
-        if (r == null || Boolean.TRUE.equals(r.getBlocked())) return;
-        String stockUid = r.getStockUid() != null ? r.getStockUid() : MAIN_STOCK;
-        UUID materialUid = r.getMaterial().getUid();
-        int qty = r.getReservedQuantity() != null ? r.getReservedQuantity() : 0;
-
-        balanceRepository.findByMaterialUidAndStockUid(materialUid, stockUid).ifPresent(balance -> {
-            int cleanBefore = balance.getCleanQuantity() != null ? balance.getCleanQuantity() : 0;
-            int reservedBefore = balance.getReservedQuantity() != null ? balance.getReservedQuantity() : 0;
-
-            balance.setCleanQuantity(cleanBefore + qty);
-            balance.setReservedQuantity(Math.max(0, reservedBefore - qty));
-            balanceRepository.save(balance);
-
-            logStockEvent(
-                    balance.getUid(), r.getUid(), materialUid, r.getDocRefill() != null ? r.getDocRefill().getUid() : null,
-                    "RELEASE",
-                    "Снята бронь " + qty + " ед.",
-                    "cleanQuantity", String.valueOf(cleanBefore), String.valueOf(cleanBefore + qty),
-                    author
-            );
-        });
-    }
-
     private void adjustOne(RegStockReservation r, int delta, String author) {
         if (r == null || delta == 0 || Boolean.TRUE.equals(r.getBlocked())) return;
         String stockUid = r.getStockUid() != null ? r.getStockUid() : MAIN_STOCK;
@@ -277,22 +268,24 @@ public class StockRegisterService {
         r.setReservedQuantity(newQty);
         reservationRepository.save(r);
 
-        balanceRepository.findByMaterialUidAndStockUid(materialUid, stockUid).ifPresent(balance -> {
-            int cleanBefore = balance.getCleanQuantity() != null ? balance.getCleanQuantity() : 0;
-            int reservedBefore = balance.getReservedQuantity() != null ? balance.getReservedQuantity() : 0;
+        RegStockBalance previous = getLastBalance(materialUid, stockUid);
+        if (previous == null) return;
 
-            balance.setCleanQuantity(cleanBefore - delta);
-            balance.setReservedQuantity(Math.max(0, reservedBefore + delta));
-            balanceRepository.save(balance);
+        int cleanBefore = previous.getCleanQuantity() != null ? previous.getCleanQuantity() : 0;
+        int reservedBefore = previous.getReservedQuantity() != null ? previous.getReservedQuantity() : 0;
+        int cleanAfter = cleanBefore - delta;
+        int reservedAfter = Math.max(0, reservedBefore + delta);
 
-            logStockEvent(
-                    balance.getUid(), r.getUid(), materialUid, r.getDocRefill() != null ? r.getDocRefill().getUid() : null,
-                    "ADJUST",
-                    "Изменение брони: " + currentQty + " → " + newQty,
-                    "reservedQuantity", String.valueOf(currentQty), String.valueOf(newQty),
-                    author
-            );
-        });
+        RegStockBalance next = pushNewBalance(previous, cleanAfter, reservedAfter, materialUid, stockUid);
+
+        logStockEvent(
+                next.getUid(), r.getUid(), materialUid,
+                r.getDocRefill() != null ? r.getDocRefill().getUid() : null,
+                "ADJUST",
+                "Изменение брони: " + currentQty + " → " + newQty,
+                "reservedQuantity", String.valueOf(currentQty), String.valueOf(newQty),
+                author
+        );
     }
 
     // ==================== ПРОВЕДЕНИЕ ====================
@@ -304,41 +297,172 @@ public class StockRegisterService {
         List<RegStockReservation> reservations = reservationRepository.findByDocRefillUidAndBlockedFalse(docRefillUid);
         if (reservations.isEmpty()) return;
 
-        Map<String, Map<UUID, Integer>> byStockMaterial = new LinkedHashMap<>();
+        // Группируем по номенклатуре (склад = MAIN, потому что все брони пополнения — на MAIN)
+        Map<UUID, Integer> byMaterial = new LinkedHashMap<>();
         for (RegStockReservation r : reservations) {
-            String stockUid = r.getStockUid() != null ? r.getStockUid() : MAIN_STOCK;
             UUID materialUid = r.getMaterial().getUid();
             int qty = r.getReservedQuantity() != null ? r.getReservedQuantity() : 0;
             if (qty <= 0) continue;
-            byStockMaterial
-                    .computeIfAbsent(stockUid, k -> new LinkedHashMap<>())
-                    .merge(materialUid, qty, Integer::sum);
+            byMaterial.merge(materialUid, qty, Integer::sum);
+        }
+        if (byMaterial.isEmpty()) {
+            reservationRepository.blockByDocRefillUid(docRefillUid);
+            return;
         }
 
-        for (Map.Entry<String, Map<UUID, Integer>> stockEntry : byStockMaterial.entrySet()) {
-            String stockUid = stockEntry.getKey();
-            for (Map.Entry<UUID, Integer> matEntry : stockEntry.getValue().entrySet()) {
-                UUID materialUid = matEntry.getKey();
-                int qty = matEntry.getValue();
+        // Получаем документ пополнения (для кода и для станции)
+        DocRefill doc = docRefillRepository.findById(docRefillUid).orElse(null);
+        String stationUid = doc != null ? doc.getStationUid() : null;
+        Integer docCode = doc != null ? doc.getCode() : null;
 
-                balanceRepository.findByMaterialUidAndStockUid(materialUid, stockUid).ifPresent(balance -> {
-                    int reservedBefore = balance.getReservedQuantity() != null ? balance.getReservedQuantity() : 0;
-                    balance.setReservedQuantity(Math.max(0, reservedBefore - qty));
-                    balanceRepository.save(balance);
+        // === ОДИН документ перемещения на всё пополнение ===
+        DocTransfer transfer = null;
+        if (stationUid != null) {
+            transfer = DocTransfer.builder()
+                    .code(nextTransferCode())
+                    .docDatetime(LocalDateTime.now())
+                    .docBaseUid(docRefillUid)
+                    .docBaseType("REFILL")
+                    .stockFromUid(MAIN_STOCK)
+                    .stockToUid(stationUid)
+                    .status("POSTED")
+                    .build();
+            transfer = docTransferRepository.save(transfer);
+        }
 
-                    logStockEvent(
-                            balance.getUid(), null, materialUid, docRefillUid,
-                            "COMMIT",
-                            "Проведение документа: списана бронь " + qty + " ед.",
-                            "reservedQuantity", String.valueOf(reservedBefore),
-                            String.valueOf(Math.max(0, reservedBefore - qty)),
-                            author
-                    );
-                });
+        for (Map.Entry<UUID, Integer> e : byMaterial.entrySet()) {
+            UUID materialUid = e.getKey();
+            int qty = e.getValue();
+
+            // 1) MAIN: фиксируем состояние (clean уже уменьшен при брони, тут только reserved −qty)
+            RegStockBalance previousMain = getLastBalance(materialUid, MAIN_STOCK);
+            if (previousMain != null) {
+                int cleanBefore = previousMain.getCleanQuantity() != null ? previousMain.getCleanQuantity() : 0;
+                int reservedBefore = previousMain.getReservedQuantity() != null ? previousMain.getReservedQuantity() : 0;
+                int reservedAfter = Math.max(0, reservedBefore - qty);
+
+                RegStockBalance nextMain = pushNewBalance(previousMain, cleanBefore, reservedAfter, materialUid, MAIN_STOCK);
+
+                logStockEvent(
+                        nextMain.getUid(), null, materialUid, docRefillUid,
+                        "COMMIT",
+                        "Проведение документа: списана бронь " + qty + " ед. с основного склада",
+                        "reservedQuantity", String.valueOf(reservedBefore), String.valueOf(reservedAfter),
+                        author
+                );
+            }
+
+            // 2) REFILL-движение на MAIN: DRAFT → POSTED (оставляем как историю пополнения)
+            markRefillMovementPosted(docRefillUid, materialUid);
+
+            // 3) Если есть станция — TRANSFER: два движения под одним doc_transfer
+            if (stationUid != null && transfer != null) {
+                // 3.1) списание с MAIN
+                createMovementPosted(
+                        transfer.getUid(), "TRANSFER", transfer.getCode(),
+                        docRefillUid, docCode,
+                        materialUid, MAIN_STOCK, -qty, author);
+
+                // 3.2) приход на станцию
+                createMovementPosted(
+                        transfer.getUid(), "TRANSFER", transfer.getCode(),
+                        docRefillUid, docCode,
+                        materialUid, stationUid, +qty, author);
+
+                // 3.3) новая запись состояния на станцию (+qty к clean)
+                RegStockBalance prevStation = ensureBalance(materialUid, stationUid);
+                int cleanStationBefore = prevStation.getCleanQuantity() != null ? prevStation.getCleanQuantity() : 0;
+                int reservedStationBefore = prevStation.getReservedQuantity() != null ? prevStation.getReservedQuantity() : 0;
+                int cleanStationAfter = cleanStationBefore + qty;
+
+                RegStockBalance nextStation = pushNewBalance(
+                        prevStation, cleanStationAfter, reservedStationBefore, materialUid, stationUid);
+
+                logStockEvent(
+                        nextStation.getUid(), null, materialUid, docRefillUid,
+                        "TRANSFER_IN",
+                        "Приход на станцию " + stationUid + " по перемещению " + transfer.getCode() + ": " + qty + " ед.",
+                        "cleanQuantity", String.valueOf(cleanStationBefore), String.valueOf(cleanStationAfter),
+                        author
+                );
             }
         }
 
+        // 4) закрываем все брони документа
         reservationRepository.blockByDocRefillUid(docRefillUid);
+    }
+
+    private Integer nextTransferCode() {
+        Integer max = docTransferRepository.findMaxCode();
+        return max != null ? max + 1 : 1;
+    }
+
+    // ==================== ДВИЖЕНИЯ (stock_movement) ====================
+
+    /** DRAFT-движение по документу пополнения: списание с MAIN. */
+    private void createRefillMovementDraft(UUID docRefillUid, UUID materialUid, String stockUid,
+                                           int qty, String author) {
+        SprMaterial material = materialRepository.findById(materialUid).orElse(null);
+        if (material == null) return;
+
+        DocRefill doc = docRefillRepository.findById(docRefillUid).orElse(null);
+
+        StockMovement m = StockMovement.builder()
+                .docUid(docRefillUid)
+                .docType("REFILL")
+                .docCode(doc != null ? doc.getCode() : null)
+                .docBaseUid(null)
+                .docBaseType(null)
+                .stockUid(stockUid)
+                .material(material)
+                .quantity(-qty)
+                .period(LocalDateTime.now())
+                .isReusable(null)
+                .isResharpen(null)
+                .isScrap(null)
+                .status("DRAFT")
+                .build();
+
+        stockMovementRepository.save(m);
+    }
+
+    /** Меняем статус DRAFT-движения пополнения на POSTED. */
+    private void markRefillMovementPosted(UUID docRefillUid, UUID materialUid) {
+        List<StockMovement> movements = stockMovementRepository.findByDocUidAndStatus(docRefillUid, "DRAFT");
+        for (StockMovement m : movements) {
+            if (m.getMaterial() != null && m.getMaterial().getUid().equals(materialUid)) {
+                m.setStatus("POSTED");
+                m.setPeriod(LocalDateTime.now());
+                stockMovementRepository.save(m);
+            }
+        }
+    }
+
+    /** POSTED-движение по перемещению (одно из двух: MAIN −qty или станция +qty). */
+    private void createMovementPosted(UUID transferUid, String docType, Integer docCode,
+                                      UUID docRefillUid, Integer docRefillCode,
+                                      UUID materialUid, String stockUid, int qty,
+                                      String author) {
+        SprMaterial material = materialRepository.findById(materialUid).orElse(null);
+        if (material == null) return;
+
+        StockMovement m = StockMovement.builder()
+                .docUid(transferUid)
+                .docType(docType)
+                .docCode(docCode)
+                .docBaseUid(docRefillUid)
+                .docBaseType("REFILL")
+                .stockUid(stockUid)
+                .material(material)
+                .quantity(qty)
+                .period(LocalDateTime.now())
+                .isReusable(null)
+                .isResharpen(null)
+                .isScrap(null)
+                .status("POSTED")
+                .build();
+
+        stockMovementRepository.save(m);
     }
 
     // ==================== ЧТЕНИЕ ====================
@@ -374,24 +498,23 @@ public class StockRegisterService {
                 .collect(Collectors.toList());
     }
 
-    /** Полная информация по складу и номенклатуре: остаток + пороги. */
     @Transactional(readOnly = true)
     public StockBalanceDto getBalanceByMaterial(UUID materialUid, String stockUid) {
         if (materialUid == null) return null;
         String effectiveStock = (stockUid == null || stockUid.isBlank()) ? MAIN_STOCK : stockUid;
-        return balanceRepository.findByMaterialUidAndStockUid(materialUid, effectiveStock)
+        return balanceRepository
+                .findTopByMaterialUidAndStockUidOrderByCreatedAtDesc(materialUid, effectiveStock)
                 .map(this::toBalanceDto)
                 .orElse(null);
     }
 
-    /** Карта полных данных (остаток + пороги) по списку номенклатур. */
     @Transactional(readOnly = true)
     public Map<UUID, StockBalanceDto> getBalancesMapByMaterials(List<UUID> materialUids, String stockUid) {
         if (materialUids == null || materialUids.isEmpty()) return Collections.emptyMap();
         String effectiveStock = (stockUid == null || stockUid.isBlank()) ? MAIN_STOCK : stockUid;
         Map<UUID, StockBalanceDto> result = new LinkedHashMap<>();
         for (UUID materialUid : materialUids) {
-            balanceRepository.findByMaterialUidAndStockUid(materialUid, effectiveStock)
+            balanceRepository.findTopByMaterialUidAndStockUidOrderByCreatedAtDesc(materialUid, effectiveStock)
                     .ifPresent(b -> result.put(materialUid, toBalanceDto(b)));
         }
         return result;
@@ -399,7 +522,7 @@ public class StockRegisterService {
 
     public Integer getAvailableQuantity(UUID materialUid, String stockUid) {
         String effectiveStock = (stockUid == null || stockUid.isBlank()) ? MAIN_STOCK : stockUid;
-        return balanceRepository.findByMaterialUidAndStockUid(materialUid, effectiveStock)
+        return balanceRepository.findTopByMaterialUidAndStockUidOrderByCreatedAtDesc(materialUid, effectiveStock)
                 .map(RegStockBalance::getCleanQuantity)
                 .orElse(DEFAULT_INITIAL_STOCK);
     }

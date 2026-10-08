@@ -329,12 +329,13 @@ public class RefillDocumentService {
                         .drumNumber(rc.getDrumNumber())
                         .columnNumber(rc.getColumnNumber())
                         .numberCell(rc.getNumberCell())
-                        .templateQuantity(rc.getTemplateQuantity())
-                        .factQuantity(rc.getFactQuantity())
+                        // Снимковые поля НЕ фиксируем при create — заполним при post
+                        .templateQuantity(null)
+                        .factQuantity(null)
+                        .minStockSnapshot(null)
+                        .criticalStockSnapshot(null)
+                        .stockControlExists(false)
                         .refillQuantity(rc.getRefillQuantity())
-                        .minStockSnapshot(rc.getMinStockSnapshot())
-                        .criticalStockSnapshot(rc.getCriticalStockSnapshot())
-                        .stockControlExists(rc.getStockControlExists() != null && rc.getStockControlExists())
                         .returnToThisCell(rc.getReturnToThisCell() != null && rc.getReturnToThisCell())
                         .isIndividual(rc.getIsIndividual() != null && rc.getIsIndividual())
                         .build();
@@ -355,18 +356,6 @@ public class RefillDocumentService {
                 cellRepository.save(cell);
             }
         } else if (template != null) {
-            final String stationUidForFact = station != null ? station.getUid() : null;
-            Map<String, Integer> factByAddress = new HashMap<>();
-            if (stationUidForFact != null) {
-                List<RegStationCell> stationCells = regStationCellRepository.findByStationUid(stationUidForFact);
-                for (RegStationCell sc : stationCells) {
-                    factByAddress.put(
-                            cellKey(sc.getDrumNumber(), sc.getColumnNumber(), sc.getNumberCell()),
-                            sc.getQuantity() != null ? sc.getQuantity() : 0
-                    );
-                }
-            }
-
             Map<String, Integer> userQty = new HashMap<>();
             if (incomingCells != null) {
                 for (CreateDocRefillRequest.RefillCellRequest c : incomingCells) {
@@ -386,24 +375,16 @@ public class RefillDocumentService {
                         .numberCell(tc.getNumberCell())
                         .cellAssignment(tc.getCellAssignment())
                         .material(tc.getMaterial())
-                        .templateQuantity(tc.getQuantity())
-                        .factQuantity(factByAddress.get(addrKey))
+                        // Снимковые поля НЕ фиксируем при create — заполним при post
+                        .templateQuantity(null)
+                        .factQuantity(null)
+                        .minStockSnapshot(null)
+                        .criticalStockSnapshot(null)
+                        .stockControlExists(false)
                         .refillQuantity(userQty.get(addrKey))
                         .returnToThisCell(tc.getReturnToThisCell() != null && tc.getReturnToThisCell())
                         .isIndividual(tc.getIsIndividual() != null && tc.getIsIndividual())
                         .build();
-
-                if (station != null && tc.getMaterial() != null) {
-                    regStockLevelControlRepository
-                            .findByStationUidAndMaterialUid(station.getUid(), tc.getMaterial().getUid())
-                            .ifPresentOrElse(reg -> {
-                                cell.setStockControlExists(true);
-                                cell.setMinStockSnapshot(reg.getMinStock());
-                                cell.setCriticalStockSnapshot(reg.getCriticalStock());
-                            }, () -> cell.setStockControlExists(false));
-                } else {
-                    cell.setStockControlExists(false);
-                }
 
                 if (cell.getRefillQuantity() != null && cell.getRefillQuantity() > 0) {
                     cellsToLoad++;
@@ -548,6 +529,56 @@ public class RefillDocumentService {
 
         List<RegRefillCell> cells = cellRepository.findByDocUid(uid);
 
+        // === ФИКСАЦИЯ СНИМКА ПЕРЕД ПРОВЕДЕНИЕМ ===
+        // Тянем живые значения из источников: reg_cells шаблона, reg_station_cells, reg_stock_level_control.
+        UUID templateUid = doc.getTemplate() != null ? doc.getTemplate().getUid() : null;
+        Map<String, RegCells> templateCellsByAddr = new HashMap<>();
+        if (templateUid != null) {
+            for (RegCells tc : regCellsRepository.findByDocPatternUid(templateUid)) {
+                templateCellsByAddr.put(cellKey(tc.getDrumNumber(), tc.getColumnNumber(), tc.getNumberCell()), tc);
+            }
+        }
+        Map<String, RegStationCell> stationCellsByAddr = new HashMap<>();
+        for (RegStationCell sc : regStationCellRepository.findByStationUid(stationUid)) {
+            stationCellsByAddr.put(cellKey(sc.getDrumNumber(), sc.getColumnNumber(), sc.getNumberCell()), sc);
+        }
+
+        for (RegRefillCell c : cells) {
+            String addrKey = cellKey(c.getDrumNumber(), c.getColumnNumber(), c.getNumberCell());
+
+            // template_quantity — из reg_cells (актуальная схема)
+            RegCells tc = templateCellsByAddr.get(addrKey);
+            if (tc != null && tc.getQuantity() != null) {
+                c.setTemplateQuantity(tc.getQuantity());
+            }
+
+            // fact_quantity — из reg_station_cells (факт на момент проведения)
+            RegStationCell sc = stationCellsByAddr.get(addrKey);
+            c.setFactQuantity(sc != null ? (sc.getQuantity() != null ? sc.getQuantity() : 0) : 0);
+
+            // пороги КУО — из reg_stock_level_control по паре (station, material)
+            if (c.getMaterial() != null) {
+                regStockLevelControlRepository
+                        .findByStationUidAndMaterialUid(stationUid, c.getMaterial().getUid())
+                        .ifPresentOrElse(reg -> {
+                            c.setStockControlExists(true);
+                            c.setMinStockSnapshot(reg.getMinStock());
+                            c.setCriticalStockSnapshot(reg.getCriticalStock());
+                        }, () -> {
+                            c.setStockControlExists(false);
+                            c.setMinStockSnapshot(null);
+                            c.setCriticalStockSnapshot(null);
+                        });
+            } else {
+                c.setStockControlExists(false);
+                c.setMinStockSnapshot(null);
+                c.setCriticalStockSnapshot(null);
+            }
+
+            cellRepository.save(c);
+        }
+
+        // === Проведение: обновляем reg_station_cells ===
         for (RegRefillCell c : cells) {
             Integer refillQty = c.getRefillQuantity();
             if (refillQty == null || refillQty <= 0) continue;
@@ -732,8 +763,81 @@ public class RefillDocumentService {
         }
 
         List<RegRefillCell> cells = cellRepository.findByDocUid(doc.getUid());
-        dto.setCells(cells.stream().map(this::toCellDTO).collect(Collectors.toList()));
+
+        // Для черновика (NEW/SAVED) — снимковые поля тянем ЖИВЫЕ из источников.
+        // Для POSTED — берём как есть из документа (снимок зафиксирован).
+        boolean isDraft = !"POSTED".equals(doc.getStatus());
+        if (isDraft) {
+            cells = refreshLiveSnapshotForDraft(doc, cells);
+        }
+
+        final boolean draftFlag = isDraft;
+        dto.setCells(cells.stream().map(c -> toCellDTO(c, draftFlag)).collect(Collectors.toList()));
         return dto;
+    }
+
+    /**
+     * Перезапрашивает актуальные значения templateQuantity, factQuantity,
+     * minStockSnapshot, criticalStockSnapshot, stockControlExists из живых источников
+     * (reg_cells шаблона, reg_station_cells, reg_stock_level_control) и накладывает их
+     * поверх ячеек документа. НЕ сохраняет в БД — только для отдачи наружу.
+     * Используется для черновиков (NEW/SAVED).
+     */
+    private List<RegRefillCell> refreshLiveSnapshotForDraft(DocRefill doc, List<RegRefillCell> cells) {
+        if (cells.isEmpty()) return cells;
+
+        UUID templateUid = doc.getTemplate() != null ? doc.getTemplate().getUid() : null;
+        String stationUid = doc.getStationUid();
+
+        Map<String, RegCells> templateCellsByAddr = new HashMap<>();
+        if (templateUid != null) {
+            for (RegCells tc : regCellsRepository.findByDocPatternUid(templateUid)) {
+                templateCellsByAddr.put(cellKey(tc.getDrumNumber(), tc.getColumnNumber(), tc.getNumberCell()), tc);
+            }
+        }
+
+        Map<String, RegStationCell> stationCellsByAddr = new HashMap<>();
+        if (stationUid != null) {
+            for (RegStationCell sc : regStationCellRepository.findByStationUid(stationUid)) {
+                stationCellsByAddr.put(cellKey(sc.getDrumNumber(), sc.getColumnNumber(), sc.getNumberCell()), sc);
+            }
+        }
+
+        // Пороги КУО кэшируем по materialUid
+        Map<UUID, Optional<RegStockLevelControl>> kuoCache = new HashMap<>();
+
+        for (RegRefillCell c : cells) {
+            String addrKey = cellKey(c.getDrumNumber(), c.getColumnNumber(), c.getNumberCell());
+
+            RegCells tc = templateCellsByAddr.get(addrKey);
+            if (tc != null && tc.getQuantity() != null) {
+                c.setTemplateQuantity(tc.getQuantity());
+            }
+
+            RegStationCell sc = stationCellsByAddr.get(addrKey);
+            c.setFactQuantity(sc != null ? (sc.getQuantity() != null ? sc.getQuantity() : 0) : 0);
+
+            if (c.getMaterial() != null && stationUid != null) {
+                UUID mUid = c.getMaterial().getUid();
+                Optional<RegStockLevelControl> kuo = kuoCache.computeIfAbsent(mUid,
+                        k -> regStockLevelControlRepository.findByStationUidAndMaterialUid(stationUid, k));
+                if (kuo.isPresent()) {
+                    c.setStockControlExists(true);
+                    c.setMinStockSnapshot(kuo.get().getMinStock());
+                    c.setCriticalStockSnapshot(kuo.get().getCriticalStock());
+                } else {
+                    c.setStockControlExists(false);
+                    c.setMinStockSnapshot(null);
+                    c.setCriticalStockSnapshot(null);
+                }
+            } else {
+                c.setStockControlExists(false);
+                c.setMinStockSnapshot(null);
+                c.setCriticalStockSnapshot(null);
+            }
+        }
+
+        return cells;
     }
 
     private RefillCellDto buildCellDtoFromTemplate(RegCells tc, Integer factQty) {
@@ -782,7 +886,7 @@ public class RefillDocumentService {
                 .build();
     }
 
-    private RefillCellDto toCellDTO(RegRefillCell c) {
+    private RefillCellDto toCellDTO(RegRefillCell c, boolean isDraft) {
         SprCellAssignment assignment = c.getCellAssignment();
         SprMaterial material = c.getMaterial();
 
