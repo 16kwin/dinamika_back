@@ -1,4 +1,4 @@
-// TemplateService.java — ПОЛНЫЙ ФАЙЛ (с историей изменений шаблона)
+// TemplateService.java — ПОЛНЫЙ ФАЙЛ (с историей изменений шаблона + синхронизация reg_station_cells)
 package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.*;
@@ -26,6 +26,9 @@ public class TemplateService {
     private final SprMaterialRepository materialRepository;
     private final SprCellAssignmentRepository cellAssignmentRepository;
     private final TemplateColumnSettingsService columnSettingsService;
+
+    // === Регистр фактических ячеек станции ===
+    private final RegStationCellRepository regStationCellRepository;
 
     // === История ===
     private final TemplateEventLogRepository templateEventLogRepository;
@@ -453,18 +456,14 @@ public class TemplateService {
 
         String name = template.getNamePattern();
 
-        // Логируем ДО удаления — но таблица template_event_log имеет ON DELETE CASCADE,
-        // поэтому запись удалится вместе с шаблоном. Чтобы история сохранилась при
-        // удалении, можно либо не удалять шаблон физически (soft delete), либо
-        // хранить историю вне шаблона.
-        //
-        // Текущая миграция: template_uid REFERENCES doc_pattern(uid) ON DELETE CASCADE —
-        // значит при удалении шаблона история исчезнет.
-        //
-        // Если это нежелательно — надо в миграции поменять на ON DELETE SET NULL
-        // и тогда строка истории останется с template_uid = NULL.
-        // Сейчас пишем событие и полагаемся на то, что если политика CASCADE —
-        // запись удалится вместе с шаблоном (что логично — история мёртвого шаблона не нужна).
+        // Снимаем шаблон со станций + удаляем регистр ячеек этих станций
+        List<Station> stations = stationRepository.findByActiveTemplateUid(uid);
+        for (Station s : stations) {
+            s.setActiveTemplate(null);
+            stationRepository.save(s);
+            regStationCellRepository.deleteByStationUid(s.getUid());
+        }
+
         logTemplateEvent(
                 template.getUid(),
                 null,
@@ -515,7 +514,6 @@ public class TemplateService {
 
         docPatternRepository.save(copy);
 
-        // Копирование ячеек
         List<RegCells> sourceCells = regCellsRepository.findByDocPatternUid(source.getUid());
         for (RegCells src : sourceCells) {
             RegCells newCell = new RegCells();
@@ -568,7 +566,7 @@ public class TemplateService {
                 ? request.getCells() : Collections.emptyList();
         Set<String> newKeys = new HashSet<>();
 
-        // 3. Собираем diff — до фактического удаления/вставки
+        // 3. Diff
         List<String> diffs = new ArrayList<>();
         int createdCount = 0;
         int updatedCount = 0;
@@ -581,7 +579,6 @@ public class TemplateService {
             newKeys.add(key);
         }
 
-        // Изменённые или созданные
         for (Map.Entry<String, SaveBatchCellsRequest.BatchCellItem> e : newMap.entrySet()) {
             String key = e.getKey();
             SaveBatchCellsRequest.BatchCellItem ni = e.getValue();
@@ -595,7 +592,6 @@ public class TemplateService {
                 continue;
             }
 
-            // Сравниваем поля
             String oldAssignUid = old.getCellAssignment() != null ? old.getCellAssignment().getUid().toString() : null;
             String newAssignUid = ni.getCellAssignmentUid() != null ? ni.getCellAssignmentUid().toString() : null;
             if (!Objects.equals(oldAssignUid, newAssignUid)) {
@@ -642,7 +638,6 @@ public class TemplateService {
             }
         }
 
-        // Удалённые
         for (String oldKey : oldMap.keySet()) {
             if (!newKeys.contains(oldKey)) {
                 RegCells old = oldMap.get(oldKey);
@@ -652,7 +647,7 @@ public class TemplateService {
             }
         }
 
-        // 4. Фактическая запись
+        // 4. Запись
         regCellsRepository.deleteByDocPatternUid(templateUid);
 
         for (SaveBatchCellsRequest.BatchCellItem item : newItems) {
@@ -682,50 +677,26 @@ public class TemplateService {
 
         recalcTemplateStats(template);
 
-        // 5. Логируем одним событием BATCH_SAVE + детализацию
+        // 5. Синхронизация регистра станций, где установлен этот шаблон
+        syncStationCellsForTemplate(template);
+
+        // 6. Логирование
         if (createdCount > 0 || updatedCount > 0 || deletedCount > 0) {
             String summary = String.format(
                     "Массовое сохранение ячеек шаблона '%s': создано %d, изменено %d, удалено %d",
                     template.getNamePattern(), createdCount, updatedCount, deletedCount
             );
 
-            logTemplateEvent(
-                    templateUid,
-                    null,
-                    "BATCH_SAVE",
-                    summary,
-                    null,
-                    null,
-                    null,
-                    "Массовое сохранение"
-            );
+            logTemplateEvent(templateUid, null, "BATCH_SAVE", summary, null, null, null, "Массовое сохранение");
 
-            // Детальные строки — по одной на изменение, но не более N (например, 200),
-            // чтобы не раздувать историю. Остальное — сводка.
             int limit = Math.min(diffs.size(), 200);
             for (int i = 0; i < limit; i++) {
-                logTemplateEvent(
-                        templateUid,
-                        null,
-                        "BATCH_ITEM",
-                        diffs.get(i),
-                        null,
-                        null,
-                        null,
-                        "Массовое сохранение"
-                );
+                logTemplateEvent(templateUid, null, "BATCH_ITEM", diffs.get(i), null, null, null, "Массовое сохранение");
             }
             if (diffs.size() > limit) {
-                logTemplateEvent(
-                        templateUid,
-                        null,
-                        "BATCH_ITEM",
+                logTemplateEvent(templateUid, null, "BATCH_ITEM",
                         "… и ещё " + (diffs.size() - limit) + " изменений (сокращено)",
-                        null,
-                        null,
-                        null,
-                        "Массовое сохранение"
-                );
+                        null, null, null, "Массовое сохранение");
             }
         }
     }
@@ -740,6 +711,91 @@ public class TemplateService {
         if (column != null) sb.append("Колонка ").append(column).append(", ");
         if (number != null) sb.append("Ячейка ").append(number);
         return sb.length() > 0 ? sb.toString() : "—";
+    }
+
+    // ==================== РЕГИСТР ЯЧЕЕК СТАНЦИИ ====================
+
+    /**
+     * Синхронизирует reg_station_cells для всех станций, где установлен этот шаблон.
+     * Создаёт недостающие записи (quantity = 0), обновляет назначение/номенклатуру/флаги,
+     * удаляет записи по адресам, которых больше нет в шаблоне.
+     */
+    @Transactional
+    public void syncStationCellsForTemplate(DocPattern template) {
+        List<Station> stations = stationRepository.findByActiveTemplateUid(template.getUid());
+        for (Station s : stations) {
+            syncStationCellsForStation(s, template);
+        }
+    }
+
+    /**
+     * Синхронизирует reg_station_cells для одной станции по её активному шаблону.
+     * Вызывать при установке шаблона на станцию.
+     */
+    @Transactional
+    public void syncStationCellsForStation(Station station, DocPattern template) {
+        if (station == null || template == null) return;
+
+        // 1. Собираем адреса шаблона
+        List<RegCells> templateCells = regCellsRepository.findByDocPatternUid(template.getUid());
+        Map<String, RegCells> tmplByKey = new HashMap<>();
+        for (RegCells tc : templateCells) {
+            tmplByKey.put(cellKey(tc.getDrumNumber(), tc.getColumnNumber(), tc.getNumberCell()), tc);
+        }
+
+        // 2. Существующие записи регистра станции
+        List<RegStationCell> existing = regStationCellRepository.findByStationUid(station.getUid());
+        Map<String, RegStationCell> existingByKey = new HashMap<>();
+        for (RegStationCell sc : existing) {
+            existingByKey.put(cellKey(sc.getDrumNumber(), sc.getColumnNumber(), sc.getNumberCell()), sc);
+        }
+
+        // 3. Обновляем/создаём
+        for (Map.Entry<String, RegCells> e : tmplByKey.entrySet()) {
+            String key = e.getKey();
+            RegCells tc = e.getValue();
+            RegStationCell sc = existingByKey.get(key);
+
+            if (sc == null) {
+                sc = RegStationCell.builder()
+                        .uid(UUID.randomUUID())
+                        .station(station)
+                        .drumNumber(tc.getDrumNumber())
+                        .columnNumber(tc.getColumnNumber())
+                        .numberCell(tc.getNumberCell())
+                        .cellAssignment(tc.getCellAssignment())
+                        .material(tc.getMaterial())
+                        .quantity(0)
+                        .returnToThisCell(tc.getReturnToThisCell() != null && tc.getReturnToThisCell())
+                        .isIndividual(tc.getIsIndividual() != null && tc.getIsIndividual())
+                        .build();
+                regStationCellRepository.save(sc);
+            } else {
+                // синхронизируем справочные поля, количество НЕ трогаем
+                sc.setCellAssignment(tc.getCellAssignment());
+                sc.setMaterial(tc.getMaterial());
+                sc.setReturnToThisCell(tc.getReturnToThisCell() != null && tc.getReturnToThisCell());
+                sc.setIsIndividual(tc.getIsIndividual() != null && tc.getIsIndividual());
+                regStationCellRepository.save(sc);
+            }
+        }
+
+        // 4. Удаляем записи, которых больше нет в шаблоне
+        for (Map.Entry<String, RegStationCell> e : existingByKey.entrySet()) {
+            if (!tmplByKey.containsKey(e.getKey())) {
+                regStationCellRepository.delete(e.getValue());
+            }
+        }
+    }
+
+    /**
+     * Удаляет все записи reg_station_cells для станции.
+     * Вызывать при снятии шаблона со станции.
+     */
+    @Transactional
+    public void clearStationCells(String stationUid) {
+        if (stationUid == null) return;
+        regStationCellRepository.deleteByStationUid(stationUid);
     }
 
     // ==================== НАЗНАЧЕНИЯ ЯЧЕЕК (справочник) ====================
@@ -791,24 +847,19 @@ public class TemplateService {
             cell.setMaterial(material);
         }
 
-        if (request.getReturnToThisCell() != null) {
-            cell.setReturnToThisCell(request.getReturnToThisCell());
-        }
-        if (request.getIsIndividual() != null) {
-            cell.setIsIndividual(request.getIsIndividual());
-        }
+        if (request.getReturnToThisCell() != null) cell.setReturnToThisCell(request.getReturnToThisCell());
+        if (request.getIsIndividual() != null) cell.setIsIndividual(request.getIsIndividual());
 
         regCellsRepository.save(cell);
         recalcTemplateStats(template);
+        syncStationCellsForTemplate(template);
 
         logTemplateEvent(
                 template.getUid(),
                 cell.getUid(),
                 "CREATE",
                 "Создание ячейки " + formatCellLabel(cell.getDrumNumber(), cell.getColumnNumber(), cell.getNumberCell()),
-                null,
-                null,
-                null,
+                null, null, null,
                 "Через карточку"
         );
 
@@ -823,7 +874,6 @@ public class TemplateService {
         DocPattern template = cell.getDocPattern();
         String cellLabel = formatCellLabel(cell.getDrumNumber(), cell.getColumnNumber(), cell.getNumberCell());
 
-        // === Назначение ===
         String oldAssignUid = cell.getCellAssignment() != null ? cell.getCellAssignment().getUid().toString() : null;
         String newAssignUid = request.getCellAssignmentUid() != null ? request.getCellAssignmentUid().toString() : null;
         if (!Objects.equals(oldAssignUid, newAssignUid)) {
@@ -841,7 +891,6 @@ public class TemplateService {
             cell.setCellAssignment(cell.getCellAssignment());
         }
 
-        // === Материал ===
         String oldMatUid = cell.getMaterial() != null ? cell.getMaterial().getUid().toString() : null;
         String newMatUid = request.getMaterialUid() != null ? request.getMaterialUid().toString() : null;
         if (!Objects.equals(oldMatUid, newMatUid)) {
@@ -857,7 +906,6 @@ public class TemplateService {
             cell.setMaterial(newMat);
         }
 
-        // === Количество ===
         if (!Objects.equals(cell.getQuantity(), request.getQuantity())) {
             logTemplateEvent(template.getUid(), cell.getUid(), "UPDATE",
                     "Ячейка " + cellLabel + ": Количество " + (cell.getQuantity() != null ? cell.getQuantity() : "—") + " → " + (request.getQuantity() != null ? request.getQuantity() : "—"),
@@ -868,7 +916,6 @@ public class TemplateService {
             cell.setQuantity(request.getQuantity());
         }
 
-        // === Возврат в ячейку ===
         if (request.getReturnToThisCell() != null) {
             boolean oldV = cell.getReturnToThisCell() != null && cell.getReturnToThisCell();
             boolean newV = request.getReturnToThisCell();
@@ -880,7 +927,6 @@ public class TemplateService {
             cell.setReturnToThisCell(request.getReturnToThisCell());
         }
 
-        // === Индивидуальная ячейка ===
         if (request.getIsIndividual() != null) {
             boolean oldV = cell.getIsIndividual() != null && cell.getIsIndividual();
             boolean newV = request.getIsIndividual();
@@ -894,6 +940,7 @@ public class TemplateService {
 
         regCellsRepository.save(cell);
         recalcTemplateStats(template);
+        syncStationCellsForTemplate(template);
 
         return toCellDto(cell);
     }
@@ -906,7 +953,6 @@ public class TemplateService {
         DocPattern template = cell.getDocPattern();
         String cellLabel = formatCellLabel(cell.getDrumNumber(), cell.getColumnNumber(), cell.getNumberCell());
 
-        // Снимок для истории
         String oldAssignName = cell.getCellAssignment() != null ? cell.getCellAssignment().getName() : null;
         String oldMatName = cell.getMaterial() != null ? cell.getMaterial().getNameMaterial() : null;
         Integer oldQty = cell.getQuantity();
@@ -914,6 +960,7 @@ public class TemplateService {
         cell.clear();
         regCellsRepository.save(cell);
         recalcTemplateStats(template);
+        syncStationCellsForTemplate(template);
 
         logTemplateEvent(
                 template.getUid(),
@@ -923,10 +970,7 @@ public class TemplateService {
                         " (было: Назначение='" + (oldAssignName != null ? oldAssignName : "—") +
                         "', Номенклатура='" + (oldMatName != null ? oldMatName : "—") +
                         "', Количество=" + (oldQty != null ? oldQty : "—") + ")",
-                null,
-                null,
-                null,
-                "Через карточку"
+                null, null, null, "Через карточку"
         );
     }
 
@@ -936,9 +980,7 @@ public class TemplateService {
         DocPattern template = null;
 
         for (RegCells cell : cells) {
-            if (template == null) {
-                template = cell.getDocPattern();
-            }
+            if (template == null) template = cell.getDocPattern();
             String cellLabel = formatCellLabel(cell.getDrumNumber(), cell.getColumnNumber(), cell.getNumberCell());
 
             String oldAssignName = cell.getCellAssignment() != null ? cell.getCellAssignment().getName() : null;
@@ -954,10 +996,7 @@ public class TemplateService {
                     "Массовая очистка ячейки " + cellLabel +
                             " (было: Назначение='" + (oldAssignName != null ? oldAssignName : "—") +
                             "', Номенклатура='" + (oldMatName != null ? oldMatName : "—") + "')",
-                    null,
-                    null,
-                    null,
-                    "Через карточку"
+                    null, null, null, "Через карточку"
             );
         }
 
@@ -965,6 +1004,7 @@ public class TemplateService {
 
         if (template != null) {
             recalcTemplateStats(template);
+            syncStationCellsForTemplate(template);
         }
     }
 
