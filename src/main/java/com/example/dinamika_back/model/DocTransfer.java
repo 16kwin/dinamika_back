@@ -1,8 +1,8 @@
+// DocTransfer.java — ПОЛНЫЙ ФАЙЛ (добавлено closedAt)
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
 import lombok.*;
-
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -16,8 +16,7 @@ import java.util.UUID;
 public class DocTransfer {
 
     @Id
-    @GeneratedValue
-    @Column(name = "uid", nullable = false, updatable = false)
+    @Column(name = "uid", nullable = false)
     private UUID uid;
 
     @Column(name = "code")
@@ -29,35 +28,35 @@ public class DocTransfer {
     @Column(name = "doc_base_uid")
     private UUID docBaseUid;
 
-    @Column(name = "doc_base_type", length = 50)
+    @Column(name = "doc_base_type")
     private String docBaseType;
 
-    @Column(name = "stock_from_uid", length = 50)
+    @Column(name = "stock_from_uid")
     private String stockFromUid;
 
-    @Column(name = "stock_to_uid", length = 50)
+    @Column(name = "stock_to_uid")
     private String stockToUid;
 
-    @Column(name = "status", nullable = false, length = 20)
+    @Column(name = "status", nullable = false)
     private String status;
 
-    @Column(name = "created_at", nullable = false)
+    @Column(name = "closed_at")
+    private LocalDateTime closedAt;
+
+    @Column(name = "created_at")
     private LocalDateTime createdAt;
 
-    @Column(name = "updated_at", nullable = false)
+    @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
     @PrePersist
-    public void prePersist() {
-        LocalDateTime now = LocalDateTime.now();
-        if (createdAt == null) createdAt = now;
-        if (updatedAt == null) updatedAt = now;
-        if (docDatetime == null) docDatetime = now;
-        if (status == null) status = "DRAFT";
+    protected void onCreate() {
+        createdAt = LocalDateTime.now();
+        updatedAt = LocalDateTime.now();
     }
 
     @PreUpdate
-    public void preUpdate() {
+    protected void onUpdate() {
         updatedAt = LocalDateTime.now();
     }
 }

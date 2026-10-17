@@ -17,4 +17,6 @@ public interface DocTransferRepository extends JpaRepository<DocTransfer, UUID> 
 
     @Query("SELECT MAX(d.code) FROM DocTransfer d")
     Integer findMaxCode();
+    List<DocTransfer> findByDocBaseUidAndDocBaseType(UUID docBaseUid, String docBaseType);
+
 }

@@ -1,4 +1,4 @@
-// SecurityConfig.java — ПОЛНЫЙ ФАЙЛ
+// SecurityConfig.java — ПОЛНЫЙ ФАЙЛ (добавлены /api/employees/**)
 package com.example.dinamika_back.config.security;
 
 import com.nimbusds.jose.crypto.DirectDecrypter;
@@ -144,6 +144,7 @@ public class SecurityConfig {
                             .requestMatchers("/api/enterprises/**").permitAll()
                             .requestMatchers("/api/workshops/**").permitAll()
                             .requestMatchers("/api/sections/**").permitAll()
+                            .requestMatchers("/api/employees/**").permitAll()
                             .requestMatchers("/api/station-types/**").permitAll()
                             .requestMatchers("/api/station-manufacturers/**").permitAll()
                             .requestMatchers("/api/station-models/**").permitAll()
@@ -169,6 +170,7 @@ public class SecurityConfig {
                             "/api/enterprises/**",
                             "/api/workshops/**",
                             "/api/sections/**",
+                            "/api/employees/**",
                             "/api/station-types/**",
                             "/api/station-manufacturers/**",
                             "/api/station-models/**",
