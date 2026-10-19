@@ -1,0 +1,41 @@
+# Ключи реестра функций (B/features/Feature.java) в порядке объявления.
+# FeatureCatalogContractTest сверяет реестр с этим списком: добавление, удаление или переименование функции —
+# осознанное изменение (меняются потолки установок, отчёт и фронтенд services/features/catalog.ts)
+video
+video.live
+video.clips
+video.recording
+video.archive
+video.download
+video.cameras
+map
+map.plan
+map.edit
+model3d
+model3d.upload
+gpp
+dashboards
+dashboards.economic
+dashboards.audit
+dashboards.graph
+dashboards.screen
+orders
+websocket
+export
+uploads
+integrations
+anonymous
+pwa
+passwords
+drafts
+stubs
+testsync
+legacy
+photoimport
+ai
+telemetry
+remote
+autoupdate
+push
+cloud
+mail

@@ -1,0 +1,60 @@
+Служба Windows для AWMS «ДИНАМИКА» через NSSM (https://nssm.cc) — шаблон команд.
+Выполнять в PowerShell от имени администратора. Пути поправить под сервер: JDK, каталог C:\AWMS\app, имя jar.
+
+Правила те же, что для WinSW (winsw.xml.example):
+  - пути к файлам потолка и секретов — только абсолютные (AWMS_FEATURES_FILE, AWMS_SECRETS_FILE);
+  - ключи белого списка потолка НЕ задавать ни в аргументах, ни в окружении: служба не запустится, в логе
+    будет имя ключа. Их место — config\awms-features.properties. Это ровно server.address, server.port,
+    server.ssl.enabled, server.ssl.key-store, server.ssl.protocol, sync.service.url, video.ffmpeg-path и все
+    awms.*; в окружении — SERVER_PORT, SERVER_ADDRESS, SERVER_SSL_ENABLED, SERVER_SSL_KEYSTORE,
+    SERVER_SSL_PROTOCOL, SYNC_SERVICE_URL, VIDEO_FFMPEGPATH, SPRING_APPLICATION_JSON и любые AWMS_*, кроме
+    AWMS_FEATURES_FILE и AWMS_SECRETS_FILE (подробно — deploy\INSTALL.md, раздел 1, шаг 3);
+  - прочие настройки сервера (server.tomcat.*, server.forward-headers-strategy, logging.*) задаются
+    в AppParameters — в файле потолка они отменяют запуск;
+  - пароли и ключи — в config\awms-secrets.properties (после пакета B10), не в параметрах службы
+    (до B10 — временно переменными, см. конец файла);
+  - не добавлять -agentlib:jdwp (отладчик) и -Dcom.sun.management.jmxremote (удалённый JMX).
+
+1. Установка
+
+nssm install awms "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot\bin\java.exe"
+nssm set awms AppParameters "-Xms512m -Xmx2g -Dfile.encoding=UTF-8 -jar C:\AWMS\app\dinamika_back.jar"
+nssm set awms AppDirectory C:\AWMS\app
+nssm set awms AppEnvironmentExtra AWMS_FEATURES_FILE=C:\AWMS\app\config\awms-features.properties AWMS_SECRETS_FILE=C:\AWMS\app\config\awms-secrets.properties
+nssm set awms DisplayName "AWMS DINAMIKA"
+nssm set awms Description "AWMS DINAMIKA: server prilozheniya (Spring Boot)"
+nssm set awms Start SERVICE_DELAYED_AUTO_START
+nssm set awms AppStdout C:\AWMS\app\logs\service.out.log
+nssm set awms AppStderr C:\AWMS\app\logs\service.err.log
+nssm set awms AppRotateFiles 1
+nssm set awms AppRotateBytes 10485760
+nssm set awms AppStopMethodConsole 30000
+nssm set awms AppExit Default Restart
+nssm set awms AppRestartDelay 20000
+
+Если PostgreSQL на этом же сервере — служба ждёт его запуска (имя проверить: Get-Service postgres*):
+nssm set awms DependOnService postgresql-x64-18
+
+2. Отдельная виртуальная учётная запись (без пароля, без прав администратора)
+
+sc.exe config awms obj= "NT SERVICE\awms"
+
+Права на каталоги для неё — deploy\INSTALL.md, раздел «Права на каталоги».
+
+3. Запуск и проверка
+
+nssm start awms
+nssm status awms
+nssm dump awms        — показать все параметры службы (проверить, что ключей белого списка в них нет)
+
+До пакета B10 учётную запись БД (роли из deploy\db\roles.sql) передать временно переменными окружения:
+nssm edit awms → вкладка Environment, к двум строкам AWMS_* добавить
+  SPRING_DATASOURCE_USERNAME=awms_app
+  SPRING_DATASOURCE_PASSWORD=<пароль>
+  SPRING_FLYWAY_USER=awms_owner
+  SPRING_FLYWAY_PASSWORD=<пароль>
+Если служба сама держит HTTPS (server.ssl.enabled=true в потолке), там же — пароль хранилища ключей:
+  SERVER_SSL_KEYSTOREPASSWORD=<пароль>
+Пароли вводить в окне, а не командой nssm set: иначе они останутся в истории консоли. Параметры NSSM хранятся
+в реестре (HKLM\SYSTEM\CurrentControlSet\Services\awms\Parameters) и видны администраторам сервера.
+После B10 эти переменные убрать: пароли — только в config\awms-secrets.properties.

@@ -1,5 +1,7 @@
 package com.example.dinamika_back.controller;
 
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.model.TestDocument;
 import com.example.dinamika_back.service.TestDocumentService;
 import lombok.RequiredArgsConstructor;
@@ -8,7 +10,9 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
+/** Приём тестовых документов из второй базы (функция {@code testsync}): без функции в потолке контроллера нет */
 @RestController
+@ConditionalOnFeature(Feature.TESTSYNC)
 @RequestMapping("/api/sync")
 @RequiredArgsConstructor
 public class SyncReceiverController {

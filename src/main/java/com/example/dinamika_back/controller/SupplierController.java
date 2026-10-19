@@ -2,13 +2,20 @@
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
+import com.example.dinamika_back.features.Feature;
+import com.example.dinamika_back.features.FeatureService;
 import com.example.dinamika_back.service.SupplierService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -18,6 +25,8 @@ import java.util.UUID;
 public class SupplierController {
 
     private final SupplierService supplierService;
+    /** Сторож файла в поставке, где файл необязателен: функция uploads */
+    private final FeatureService features;
 
     @GetMapping("/generate")
     public ResponseEntity<SupplierCreateResponse> generate() {
@@ -150,18 +159,56 @@ public class SupplierController {
         return ResponseEntity.ok(supplierService.getDeliveries(supplierUid));
     }
 
+    /**
+     * Поставка (и позиция ассортимента) из формы (multipart), файл документа необязателен; присланный файл
+     * при выключенных загрузках — 404 (сторож). Запрос с телом JSON обслуживает {@link #addDeliveryJson}
+     */
     @PostMapping("/{supplierUid}/deliveries")
     public ResponseEntity<MaterialSupplyDTO> addDelivery(
             @PathVariable UUID supplierUid,
             @RequestParam("materialUid") UUID materialUid,
             @RequestParam(value = "supplyDate", required = false) String supplyDate,
             @RequestParam(value = "documentName", required = false) String documentName,
-            @RequestParam(value = "file", required = false) MultipartFile file) {
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            Authentication authentication) {
+        requireUploadsFor(file, authentication);
+        return saveDelivery(supplierUid, materialUid, supplyDate, documentName, file);
+    }
+
+    /** Поставка без файла: тело JSON, поля как у формы. Дата — {@code 2026-10-14T09:30[:00]}, без даты — текущий момент */
+    public record DeliveryRequest(UUID materialUid, LocalDateTime supplyDate, String documentName) {
+    }
+
+    /**
+     * Поставка и позиция ассортимента без файла: JSON {@code {materialUid, supplyDate, documentName}}.
+     * Работает при любом составе функций, в том числе без загрузок файлов
+     */
+    @PostMapping(value = "/{supplierUid}/deliveries", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<MaterialSupplyDTO> addDeliveryJson(@PathVariable UUID supplierUid,
+                                                             @RequestBody DeliveryRequest request) {
+        if (request.materialUid() == null) return ResponseEntity.badRequest().build();
+        String supplyDate = request.supplyDate() != null ? request.supplyDate().toString() : null;
+        return saveDelivery(supplierUid, request.materialUid(), supplyDate, request.documentName(), null);
+    }
+
+    private ResponseEntity<MaterialSupplyDTO> saveDelivery(UUID supplierUid, UUID materialUid, String supplyDate,
+                                                           String documentName, MultipartFile file) {
         try {
             return ResponseEntity.ok(supplierService.addDelivery(supplierUid, materialUid, supplyDate, documentName, file));
         } catch (IOException e) {
             return ResponseEntity.internalServerError().build();
         }
+    }
+
+    /**
+     * Сторож формы, где файл необязателен (раздел 6.4 проекта): до пакета B4b ворота путь не закрывают.
+     * Присланный файл при выключенных загрузках (uploads) — 404, как у закрытого пути загрузки; при ролях загрузки
+     * в потолке ({@code awms.features.uploads.roles}) и чужой роли — 403. Без файла запрос проходит
+     */
+    private void requireUploadsFor(MultipartFile file, Authentication authentication) {
+        if (file == null || file.isEmpty()) return;
+        features.require(Feature.UPLOADS);
+        if (!features.isOnFor(Feature.UPLOADS, authentication)) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
     }
 
     @DeleteMapping("/deliveries/{uid}")

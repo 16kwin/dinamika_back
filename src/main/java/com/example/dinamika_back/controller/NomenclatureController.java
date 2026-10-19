@@ -2,12 +2,20 @@
 package com.example.dinamika_back.controller;
 
 import com.example.dinamika_back.dto.*;
+import com.example.dinamika_back.features.Feature;
+import com.example.dinamika_back.features.FeatureService;
 import com.example.dinamika_back.service.NomenclatureColumnSettingsService;
+import com.example.dinamika_back.service.NomenclatureModelService;
 import com.example.dinamika_back.service.NomenclatureService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
@@ -22,6 +30,10 @@ public class NomenclatureController {
 
     private final NomenclatureService nomenclatureService;
     private final NomenclatureColumnSettingsService columnSettingsService;
+    /** Только для подписи событий журнала: ФИО автора по логину входа */
+    private final NomenclatureModelService modelService;
+    /** Сторож файла в формах, где файл необязателен (коды, поставки): функция uploads */
+    private final FeatureService features;
 
     // ==================== ТИП КОДА ПО УМОЛЧАНИЮ ====================
 
@@ -128,10 +140,10 @@ public class NomenclatureController {
 
     // ==================== Сохранение черновика ====================
 
+    /** Поле author от клиента не используется: автор событий — только из входа */
     @PostMapping("/draft")
-    public ResponseEntity<Void> saveDraft(@RequestBody NomenclatureSaveRequest request) {
-        String author = request.getAuthor() != null ? request.getAuthor() : "Система";
-        nomenclatureService.saveDraft(request, author);
+    public ResponseEntity<Void> saveDraft(@RequestBody NomenclatureSaveRequest request, Authentication authentication) {
+        nomenclatureService.saveDraft(request, author(authentication));
         return ResponseEntity.ok().build();
     }
 
@@ -400,6 +412,7 @@ public class NomenclatureController {
     }
 
     // ==================== ИЗОБРАЖЕНИЯ ====================
+    // Здесь и ниже автор событий журнала — из входа, см. author(); ?author= клиента не используется
 
     @GetMapping("/{materialUid}/images")
     public ResponseEntity<List<MaterialMediaDTO>> getImages(@PathVariable UUID materialUid) {
@@ -410,9 +423,9 @@ public class NomenclatureController {
     public ResponseEntity<MaterialMediaDTO> uploadImage(
             @PathVariable UUID materialUid,
             @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "author", defaultValue = "Система") String author) {
+            Authentication authentication) {
         try {
-            return ResponseEntity.ok(nomenclatureService.uploadImage(materialUid, file, author));
+            return ResponseEntity.ok(nomenclatureService.uploadImage(materialUid, file, author(authentication)));
         } catch (IOException e) {
             return ResponseEntity.internalServerError().build();
         }
@@ -420,8 +433,8 @@ public class NomenclatureController {
 
     @DeleteMapping("/images/{uid}")
     public ResponseEntity<Void> deleteImage(@PathVariable UUID uid,
-                                            @RequestParam(value = "author", defaultValue = "Система") String author) {
-        nomenclatureService.deleteImage(uid, author);
+                                            Authentication authentication) {
+        nomenclatureService.deleteImage(uid, author(authentication));
         return ResponseEntity.ok().build();
     }
 
@@ -436,9 +449,9 @@ public class NomenclatureController {
     public ResponseEntity<MaterialMediaDTO> uploadBlueprint(
             @PathVariable UUID materialUid,
             @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "author", defaultValue = "Система") String author) {
+            Authentication authentication) {
         try {
-            return ResponseEntity.ok(nomenclatureService.uploadBlueprint(materialUid, file, author));
+            return ResponseEntity.ok(nomenclatureService.uploadBlueprint(materialUid, file, author(authentication)));
         } catch (IOException e) {
             return ResponseEntity.internalServerError().build();
         }
@@ -446,8 +459,8 @@ public class NomenclatureController {
 
     @DeleteMapping("/blueprints/{uid}")
     public ResponseEntity<Void> deleteBlueprint(@PathVariable UUID uid,
-                                                @RequestParam(value = "author", defaultValue = "Система") String author) {
-        nomenclatureService.deleteBlueprint(uid, author);
+                                                Authentication authentication) {
+        nomenclatureService.deleteBlueprint(uid, author(authentication));
         return ResponseEntity.ok().build();
     }
 
@@ -463,6 +476,10 @@ public class NomenclatureController {
         return ResponseEntity.ok(nomenclatureService.getCodes(materialUid));
     }
 
+    /**
+     * Код из формы (multipart). Файл необязателен; присланный файл при выключенных загрузках — 404 (сторож).
+     * Запрос с телом JSON обслуживает {@link #addCode}
+     */
     @PostMapping("/{materialUid}/codes")
     public ResponseEntity<MaterialCodeDTO> uploadCode(
             @PathVariable UUID materialUid,
@@ -470,9 +487,29 @@ public class NomenclatureController {
             @RequestParam(value = "codeValue", required = false) String codeValue,
             @RequestParam(value = "codeKind", defaultValue = "QR") String codeKind,
             @RequestParam(value = "file", required = false) MultipartFile file,
-            @RequestParam(value = "author", defaultValue = "Система") String author) {
+            Authentication authentication) {
+        requireUploadsFor(file, authentication);
+        return saveCode(materialUid, codeType, codeValue, codeKind, file, authentication);
+    }
+
+    /**
+     * Штрихкод, QR или SKU без файла: JSON {@code {codeType, codeValue, codeKind}}, умолчания те же, что у формы
+     * ({@code QR_CODE}, {@code QR}). Работает при любом составе функций, в том числе без загрузок файлов
+     */
+    @PostMapping(value = "/{materialUid}/codes", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<MaterialCodeDTO> addCode(
+            @PathVariable UUID materialUid,
+            @RequestBody CreateCodeRequest request,
+            Authentication authentication) {
+        String codeType = StringUtils.hasLength(request.getCodeType()) ? request.getCodeType() : "QR_CODE";
+        String codeKind = StringUtils.hasLength(request.getCodeKind()) ? request.getCodeKind() : "QR";
+        return saveCode(materialUid, codeType, request.getCodeValue(), codeKind, null, authentication);
+    }
+
+    private ResponseEntity<MaterialCodeDTO> saveCode(UUID materialUid, String codeType, String codeValue,
+                                                     String codeKind, MultipartFile file, Authentication authentication) {
         try {
-            return ResponseEntity.ok(nomenclatureService.uploadCode(materialUid, codeType, codeValue, codeKind, file, author));
+            return ResponseEntity.ok(nomenclatureService.uploadCode(materialUid, codeType, codeValue, codeKind, file, author(authentication)));
         } catch (IOException e) {
             return ResponseEntity.internalServerError().build();
         }
@@ -480,8 +517,8 @@ public class NomenclatureController {
 
     @DeleteMapping("/codes/{uid}")
     public ResponseEntity<Void> deleteCode(@PathVariable UUID uid,
-                                           @RequestParam(value = "author", defaultValue = "Система") String author) {
-        nomenclatureService.deleteCode(uid, author);
+                                           Authentication authentication) {
+        nomenclatureService.deleteCode(uid, author(authentication));
         return ResponseEntity.ok().build();
     }
 
@@ -497,9 +534,9 @@ public class NomenclatureController {
             @PathVariable UUID materialUid,
             @RequestParam("documentName") String documentName,
             @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "author", defaultValue = "Система") String author) {
+            Authentication authentication) {
         try {
-            return ResponseEntity.ok(nomenclatureService.uploadDocument(materialUid, documentName, file, author));
+            return ResponseEntity.ok(nomenclatureService.uploadDocument(materialUid, documentName, file, author(authentication)));
         } catch (IOException e) {
             return ResponseEntity.internalServerError().build();
         }
@@ -507,8 +544,8 @@ public class NomenclatureController {
 
     @DeleteMapping("/documents/{uid}")
     public ResponseEntity<Void> deleteDocument(@PathVariable UUID uid,
-                                               @RequestParam(value = "author", defaultValue = "Система") String author) {
-        nomenclatureService.deleteDocument(uid, author);
+                                               Authentication authentication) {
+        nomenclatureService.deleteDocument(uid, author(authentication));
         return ResponseEntity.ok().build();
     }
 
@@ -544,6 +581,10 @@ public class NomenclatureController {
         return ResponseEntity.ok(nomenclatureService.getMaterialSupplies(materialUid));
     }
 
+    /**
+     * Поставка из формы (multipart), файл документа необязателен; присланный файл при выключенных загрузках — 404
+     * (сторож). Запрос с телом JSON обслуживает {@link #addMaterialSupplyJson}
+     */
     @PostMapping("/{materialUid}/supply")
     public ResponseEntity<MaterialSupplyDTO> addMaterialSupply(
             @PathVariable UUID materialUid,
@@ -551,13 +592,32 @@ public class NomenclatureController {
             @RequestParam(value = "supplyDate", required = false) String supplyDate,
             @RequestParam(value = "documentName", required = false) String documentName,
             @RequestParam(value = "file", required = false) MultipartFile file,
-            @RequestParam(value = "author", defaultValue = "Система") String author) {
+            Authentication authentication) {
+        requireUploadsFor(file, authentication);
+        CreateSupplyRequest request = new CreateSupplyRequest();
+        request.setSupplierUid(supplierUid);
+        request.setSupplyDate(supplyDate != null ? LocalDateTime.parse(supplyDate) : null);
+        request.setDocumentName(documentName);
+        return saveSupply(materialUid, request, file, authentication);
+    }
+
+    /**
+     * Поставка без файла: JSON {@code {supplierUid, supplyDate, documentName}}, дата — {@code 2026-10-14T09:30[:00]},
+     * без даты — текущий момент. Работает при любом составе функций, в том числе без загрузок файлов
+     */
+    @PostMapping(value = "/{materialUid}/supply", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<MaterialSupplyDTO> addMaterialSupplyJson(
+            @PathVariable UUID materialUid,
+            @RequestBody CreateSupplyRequest request,
+            Authentication authentication) {
+        if (request.getSupplierUid() == null) return ResponseEntity.badRequest().build();
+        return saveSupply(materialUid, request, null, authentication);
+    }
+
+    private ResponseEntity<MaterialSupplyDTO> saveSupply(UUID materialUid, CreateSupplyRequest request,
+                                                         MultipartFile file, Authentication authentication) {
         try {
-            CreateSupplyRequest request = new CreateSupplyRequest();
-            request.setSupplierUid(supplierUid);
-            request.setSupplyDate(supplyDate != null ? LocalDateTime.parse(supplyDate) : null);
-            request.setDocumentName(documentName);
-            return ResponseEntity.ok(nomenclatureService.addMaterialSupply(materialUid, request, file, author));
+            return ResponseEntity.ok(nomenclatureService.addMaterialSupply(materialUid, request, file, author(authentication)));
         } catch (IOException e) {
             return ResponseEntity.internalServerError().build();
         }
@@ -565,8 +625,8 @@ public class NomenclatureController {
 
     @DeleteMapping("/supply/{uid}")
     public ResponseEntity<Void> deleteMaterialSupply(@PathVariable UUID uid,
-                                                     @RequestParam(value = "author", defaultValue = "Система") String author) {
-        nomenclatureService.deleteMaterialSupply(uid, author);
+                                                     Authentication authentication) {
+        nomenclatureService.deleteMaterialSupply(uid, author(authentication));
         return ResponseEntity.ok().build();
     }
 
@@ -694,6 +754,25 @@ public class NomenclatureController {
     @GetMapping("/{materialUid}/events")
     public ResponseEntity<List<EventLogDTO>> getEvents(@PathVariable UUID materialUid) {
         return ResponseEntity.ok(nomenclatureService.getEvents(materialUid));
+    }
+
+    /**
+     * Автор события — только из входа (ФИО из карточки пользователя, иначе логин), как у 3D-моделей.
+     * Параметр author от старых клиентов принимается, но не используется: подпись в журнале не подделать
+     */
+    private String author(Authentication authentication) {
+        return modelService.authorName(authentication != null ? authentication.getName() : null);
+    }
+
+    /**
+     * Сторож формы, где файл необязателен (коды, поставки; раздел 6.4 проекта): до пакета B4b ворота такие пути
+     * не закрывают. Присланный файл при выключенных загрузках (uploads) — 404, как у закрытого пути загрузки;
+     * при ролях загрузки в потолке ({@code awms.features.uploads.roles}) и чужой роли — 403. Без файла запрос проходит
+     */
+    private void requireUploadsFor(MultipartFile file, Authentication authentication) {
+        if (file == null || file.isEmpty()) return;
+        features.require(Feature.UPLOADS);
+        if (!features.isOnFor(Feature.UPLOADS, authentication)) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
     }
 
     // ==================== Получение одного материала ====================

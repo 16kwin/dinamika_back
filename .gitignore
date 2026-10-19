@@ -31,3 +31,15 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Видеоархив: записи камер не храним в репозитории ###
+video-archive/
+
+# Планы цехов и 3D-модели номенклатуры (данные сервера, не код)
+data/
+
+# Профиль функций (потолок) и секреты установки: у каждой установки свои, в репозитории — только *.example
+config/awms-features.properties
+config/awms-secrets.properties
+# Журналы приложения, в том числе AWMS.SECURITY (logs/awms-security.log)
+logs/

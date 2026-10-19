@@ -157,6 +157,34 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+				<!-- META-INF/build-info.properties: версия и время сборки бэкенда в отчёте «Профиль безопасности»
+				     и в журнале профиля (app_version) -->
+				<executions>
+					<execution>
+						<id>build-info</id>
+						<goals>
+							<goal>build-info</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<!-- Тесты работают с тестовым потолком (preset=full) и тестовыми секретами: файл разработчика
+			     ./config/awms-features.properties им не виден, путь задаётся здесь, а не рабочим каталогом.
+			     Переменная разработчика AWMS_FEATURES_PRESET (режим без файла) в тесты не передаётся: при заданном
+			     файле потолка она отменяет запуск контекста. Для запуска тестов из IDE те же две переменные
+			     прописываются в конфигурации запуска, а AWMS_FEATURES_PRESET в ней не задаётся -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<systemPropertyVariables>
+						<AWMS_FEATURES_FILE>${project.basedir}/src/test/resources/features/test-full.properties</AWMS_FEATURES_FILE>
+						<AWMS_SECRETS_FILE>${project.basedir}/src/test/resources/features/test-secrets.properties</AWMS_SECRETS_FILE>
+					</systemPropertyVariables>
+					<excludedEnvironmentVariables>
+						<excludedEnvironmentVariable>AWMS_FEATURES_PRESET</excludedEnvironmentVariable>
+					</excludedEnvironmentVariables>
+				</configuration>
 			</plugin>
 		</plugins>
 	</build>

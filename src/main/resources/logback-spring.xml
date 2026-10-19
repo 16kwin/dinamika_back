@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Логирование AWMS: как стандартное у Spring Boot (консоль, уровни logging.level.* из application.properties)
+    плюс отдельный файл журнала безопасности для логгера AWMS.SECURITY (раздел 10.1 проекта «Дискретное отключение
+    функций»): таблица функций при каждом старте и строка JOURNAL_HEAD id=… hash=… после каждой записи журнала
+    профиля. По этой строке при старте сверяется голова цепочки в БД: удаление хвоста журнала видно.
+
+    Файл — logs/awms-security.log относительно рабочего каталога службы (или каталога logging.file.path).
+    Запись в каталог логов — только учётной записи службы, чтение — ИБ (deploy/INSTALL.md). При желании заказчика
+    тот же логгер отправляется в syslog отдельным аппендером.
+
+    Стандартный base.xml не подключается целиком: он добавил бы файл spring.log во временный каталог, которого
+    сейчас нет. Подключаются его части: умолчания и консоль. Общий файл лога (logging.file.name) с этими настройками
+    не пишется: вывод консоли службы сохраняет обёртка службы (WinSW/NSSM, шаблоны deploy/service).
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <property name="AWMS_SECURITY_DIR" value="${LOG_PATH:-logs}"/>
+
+    <appender name="AWMS_SECURITY_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${AWMS_SECURITY_DIR}/awms-security.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p [%t] %logger : %m%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <!-- Без сжатия: голову цепочки сверка ищет и в прежних файлах (StartupProfileAuditor) -->
+        <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
+            <fileNamePattern>${AWMS_SECURITY_DIR}/awms-security.%i.log</fileNamePattern>
+            <minIndex>1</minIndex>
+            <maxIndex>20</maxIndex>
+        </rollingPolicy>
+        <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
+            <maxFileSize>10MB</maxFileSize>
+        </triggeringPolicy>
+    </appender>
+
+    <!-- additivity по умолчанию: строки AWMS.SECURITY видны и в консоли службы -->
+    <logger name="AWMS.SECURITY" level="INFO">
+        <appender-ref ref="AWMS_SECURITY_FILE"/>
+    </logger>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>

@@ -1,0 +1,145 @@
+# Профиль функций AWMS «ДИНАМИКА» (потолок установки) — справочник всех ключей.
+#
+# Рабочий файл — config/awms-features.properties рядом с jar (или абсолютный путь в AWMS_FEATURES_FILE).
+# Начинать лучше с готового профиля: deploy/features/isolated.properties, standard.properties или full.properties.
+# Здесь — все ключи с пояснениями; строку раскомментировать, только если нужно отступить от пресета.
+#
+# Правила:
+#  - меняет администратор ОС сервера по заявке ИБ, применяется после перезапуска службы;
+#  - только ключи из этого списка; чужой ключ или опечатка — служба не запустится, в логе будет имя ключа.
+#    Прочие настройки сервера (server.tomcat.*, server.forward-headers-strategy, logging.*, spring.*) сюда
+#    не класть — их место в аргументах службы или в application.properties рядом с jar;
+#  - эти ключи нельзя задавать переменными окружения, аргументами, -D, SPRING_APPLICATION_JSON и во внешних
+#    application.properties — служба не запустится (исключения: AWMS_FEATURES_FILE — путь к этому файлу;
+#    AWMS_FEATURES_PRESET — только когда файла нет). Имена переменных — deploy/INSTALL.md, раздел 1, шаг 3;
+#  - пароли, ключи и учётные записи БД сюда нельзя — они в config/awms-secrets.properties;
+#  - значения — латиницей и цифрами (файл читается в ISO-8859-1), комментарии — как угодно; сохранять без BOM;
+#  - дочерняя функция работает, только если включён её родитель (video.live — только при video) и то,
+#    от чего она зависит; иначе она выключается сама, в логе — предупреждение.
+# Проверка без запуска службы: java -jar dinamika_back.jar print-features --config=<путь к файлу>.
+
+# ---------------------------------------------------------------------------------------------------------
+# Пресет и основание
+# ---------------------------------------------------------------------------------------------------------
+# isolated — «Изолированный минимум» (только ядро учёта; действует и когда файла нет),
+# standard — «Стандарт» (рекомендуемый для закрытого контура), full — «Расширенный» (стенд, демо)
+awms.features.preset=standard
+# Номер заявки или служебной записки ИБ, латиницей; попадает в журнал изменений профиля
+awms.features.ticket=SZ-IB-NOMER-I-DATA
+
+# ---------------------------------------------------------------------------------------------------------
+# Функции: awms.features.<ключ>.enabled=true|false. В скобках — состояние в пресетах isolated / standard / full
+# ---------------------------------------------------------------------------------------------------------
+# Видео с IP-камер — модуль целиком: процессы ffmpeg, RTSP к камерам (выкл / выкл / вкл)
+#awms.features.video.enabled=false
+# Живой просмотр и кадр с камеры (выкл / выкл / вкл)
+#awms.features.video.live.enabled=false
+# Запись фрагмента по кнопке; нужны video.live и video.download (выкл / выкл / вкл)
+#awms.features.video.clips.enabled=false
+# Запись по событиям станции (выкл / выкл / вкл)
+#awms.features.video.recording.enabled=false
+# Журнал видеоархива и просмотр записей (выкл / выкл / вкл)
+#awms.features.video.archive.enabled=false
+# Кнопка «Скачать» у видео. При разрешённом просмотре запись всё равно можно сохранить из браузера (выкл / выкл / вкл)
+#awms.features.video.download.enabled=false
+# Изменение адресов камер и проверка потока (выкл / выкл / вкл)
+#awms.features.video.cameras.enabled=false
+# Карта станций, мнемосхема (выкл / вкл / вкл)
+#awms.features.map.enabled=false
+# Интерактивный план цеха, просмотр (выкл / вкл / вкл)
+#awms.features.map.plan.enabled=false
+# Загрузка плана цеха и правка расстановки; картинке нужен ещё uploads (выкл / вкл / вкл)
+#awms.features.map.edit.enabled=false
+# 3D-модели номенклатуры, просмотр (выкл / вкл / вкл)
+#awms.features.model3d.enabled=false
+# Загрузка и удаление 3D-моделей; нужен uploads (выкл / вкл / вкл)
+#awms.features.model3d.upload.enabled=false
+# ГПП — график подготовки производства (выкл / вкл / вкл)
+#awms.features.gpp.enabled=false
+# Информационные панели главной (выкл / вкл / вкл)
+#awms.features.dashboards.enabled=false
+# Экономический блок панелей: затраты, бюджет (выкл / вкл / вкл)
+#awms.features.dashboards.economic.enabled=false
+# Панель аудитора (выкл / вкл / вкл)
+#awms.features.dashboards.audit.enabled=false
+# Граф закупок и аффилированности; нужна dashboards.audit (выкл / выкл / вкл)
+#awms.features.dashboards.graph.enabled=false
+# «Второй экран» — лента событий (выкл / вкл / вкл)
+#awms.features.dashboards.screen.enabled=false
+# Заказы и ТКП, обмен с внешней системой; исходящие — только по awms.network.outbound.allowed (выкл / выкл / вкл)
+#awms.features.orders.enabled=false
+# Живые обновления (WebSocket, STOMP/SockJS) (выкл / выкл / вкл)
+#awms.features.websocket.enabled=false
+# Выгрузка PDF/Excel/Word и печать с сервера. Таблица на экране и печать браузера остаются (выкл / вкл / вкл)
+#awms.features.export.enabled=false
+# Загрузка файлов на сервер; без неё — «только просмотр», формы без файла работают (выкл / вкл / вкл)
+#awms.features.uploads.enabled=false
+# Вкладки «Интеграции» (журнал обмена 1С/SAP, без соединений) (выкл / выкл / вкл)
+#awms.features.integrations.enabled=false
+# Анонимный доступ, режим табло: станции, иерархия, справочники и панели без входа (выкл / выкл / вкл)
+#awms.features.anonymous.enabled=false
+# Установка как приложение, service worker (выкл / выкл / вкл)
+#awms.features.pwa.enabled=false
+# Предлагать браузеру сохранить пароль (выкл / выкл / выкл)
+#awms.features.passwords.enabled=false
+# Черновики карточек в браузере (выкл / вкл / вкл)
+#awms.features.drafts.enabled=false
+# Заглушки меню: «Отчёты», «Настройки», «Уведомления» и т. п. (выкл / выкл / вкл)
+#awms.features.stubs.enabled=false
+# Тестовые документы и синхронизация (выкл / выкл / выкл)
+#awms.features.testsync.enabled=false
+# Унаследованная раздача /images/**, /proc_docs/** и т. п. (выкл / выкл / выкл)
+#awms.features.legacy.enabled=false
+# Импорт migration_photos при старте (выкл / выкл / выкл)
+#awms.features.photoimport.enabled=false
+#
+# Отсутствуют в продукте, включить нельзя: ai, telemetry, remote, autoupdate, push, cloud, mail.
+
+# ---------------------------------------------------------------------------------------------------------
+# Роли: awms.features.<ключ>.roles=РОЛЬ,РОЛЬ. Пусто — все вошедшие. Роли: ADMIN, DIRECTOR, OPERATOR, SECURITY
+# ---------------------------------------------------------------------------------------------------------
+#awms.features.export.roles=ADMIN,DIRECTOR
+#awms.features.video.archive.roles=ADMIN,DIRECTOR
+
+# ---------------------------------------------------------------------------------------------------------
+# Переключатели администратора (этап 2) — внутри потолка, только сужают
+# ---------------------------------------------------------------------------------------------------------
+# off — никто не переключает; disable-only (умолчание) — выключают роли disable-roles, включает обратно только
+# SECURITY; full — включать обратно могут ещё роли admin.roles (без admin.roles служба не запустится)
+#awms.features.admin.mode=disable-only
+#awms.features.admin.disable-roles=ADMIN,SECURITY
+#awms.features.admin.roles=
+
+# ---------------------------------------------------------------------------------------------------------
+# Параметры безопасности. Задаются только здесь (или берутся из умолчаний jar), входят в отпечаток профиля
+# ---------------------------------------------------------------------------------------------------------
+# Сетевой интерфейс и порт службы (умолчание jar: 0.0.0.0 и 8084). За nginx на этом же сервере — 127.0.0.1
+#server.address=127.0.0.1
+#server.port=8084
+# HTTPS силами самой службы (пароль хранилища ключей — в файле секретов)
+#server.ssl.enabled=false
+#server.ssl.key-store=
+#server.ssl.protocol=TLS
+# Адреса, с которых браузер обращается к API (CORS), точно как в адресной строке; умолчание
+# http://localhost:3000,http://127.0.0.1:3000,http://localhost. За nginx по https ОБЯЗАТЕЛЬНО https://<домен сайта>:
+# служба видит запрос как http, и без строки вход отвечает 403 «Invalid CORS request» (deploy/INSTALL.md, раздел 8)
+#awms.cors.allowed-origins=https://awms.zavod.local
+# Адреса страниц для WebSocket; умолчание — тот же список, что CORS
+#awms.websocket.allowed-origins=https://awms.zavod.local
+# Исходящие HTTP, хост:порт через запятую; пусто (умолчание) — исходящих нет даже при включённых заказах
+#awms.network.outbound.allowed=
+# Адрес внешней системы заказов и ТКП (умолчание jar: http://localhost:8085)
+#sync.service.url=http://localhost:8085
+# Путь к ffmpeg (умолчание jar: C:/ffmpeg/bin/ffmpeg.exe). При выключенном видео ffmpeg не устанавливать
+#video.ffmpeg-path=C:/ffmpeg/bin/ffmpeg.exe
+# Источники видео file: и test: (эмуляторы камер для разработки); умолчание false
+#awms.video.allow-file-source=false
+# Сети камер, CIDR через запятую; умолчание — частные сети 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+#awms.video.allowed-networks=192.168.1.0/24
+# Срок хранения видеозаписей, дней (1-3650); действует и при выключенном видео
+awms.video.retention-days=30
+# true — при выключенном видео стереть сохранённые пароли камер при старте (с записью в журнал)
+#awms.video.purge-credentials=false
+# Автоблокировка интерфейса: через сколько минут бездействия и за сколько минут предупредить
+#awms.ui.inactivity-minutes=10
+#awms.ui.warning-minutes=1

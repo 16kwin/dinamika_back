@@ -2,6 +2,8 @@ package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.DashControlEventDTO;
 import com.example.dinamika_back.dto.DashboardControlEventsResponse;
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.model.DashControlEvent;
 import com.example.dinamika_back.repository.DashControlEventRepository;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +21,10 @@ import java.util.List;
  * Лента контроля качества для панелей «Контролер» (участок контролёра) и «Главный контролер»
  * (всё предприятие). Дата события не хранится: сегодня − days_ago + время суток; сегодняшние
  * события сдвигаются так, чтобы ни одно не оказалось позже текущего момента.
+ *
+ * <p>Модуль панелей: без функции {@code dashboards} в потолке бин не создаётся (L3).
  */
+@ConditionalOnFeature(Feature.DASHBOARDS)
 @Service
 @RequiredArgsConstructor
 public class DashboardControlEventService {

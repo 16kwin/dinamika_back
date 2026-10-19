@@ -5,6 +5,8 @@ import com.example.dinamika_back.dto.DashOperatorMetricDTO;
 import com.example.dinamika_back.dto.DashStationDTO;
 import com.example.dinamika_back.dto.DashStationItemDTO;
 import com.example.dinamika_back.dto.DashboardOperatorResponse;
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.model.DashOperatorEvent;
 import com.example.dinamika_back.model.DashOperatorMetricDaily;
 import com.example.dinamika_back.model.DashStationBalance;
@@ -26,7 +28,10 @@ import java.util.Map;
 /**
  * Панель «Оператор склада»: показатели станций и СГД, критические и минимальные остатки,
  * ленты заказов на поставку и событий.
+ *
+ * <p>Модуль панелей: без функции {@code dashboards} в потолке бин не создаётся (L3).
  */
+@ConditionalOnFeature(Feature.DASHBOARDS)
 @Service
 @RequiredArgsConstructor
 public class DashboardOperatorService {

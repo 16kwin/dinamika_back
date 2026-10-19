@@ -1,6 +1,8 @@
 // AWMS — controller/TkpController.java — ПОЛНЫЙ ФАЙЛ
 package com.example.dinamika_back.controller;
 
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.service.TkpService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -9,7 +11,12 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * ТКП (функция {@code orders}): без функции в потолке контроллера нет. Колбэки внешней системы (новое ТКП,
+ * статус счёта) принимаются только с верным {@code X-API-Key} — проверяет OrdersCallbackKeyFilter.
+ */
 @RestController
+@ConditionalOnFeature(Feature.ORDERS)
 @RequestMapping("/api/tkp")
 @RequiredArgsConstructor
 public class TkpController {

@@ -1,6 +1,8 @@
 // AWMS — controller/OrderController.java — ПОЛНЫЙ ФАЙЛ (убрать addTrack для фронта)
 package com.example.dinamika_back.controller;
 
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -9,7 +11,13 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Заказы (функция {@code orders}): без функции в потолке контроллера нет. Колбэки внешней системы (трек, статус,
+ * причина статуса) принимаются только с верным {@code X-API-Key} — проверяет OrdersCallbackKeyFilter по списку
+ * {@code Feature.ORDERS.callbacks()}.
+ */
 @RestController
+@ConditionalOnFeature(Feature.ORDERS)
 @RequestMapping("/api/orders")
 @RequiredArgsConstructor
 public class OrderController {
