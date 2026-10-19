@@ -11,6 +11,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -145,9 +146,14 @@ public class OrdersCallbackKeyFilter extends OncePerRequestFilter {
         return out.toString();
     }
 
-    /** Регистрация фильтра (только при функции orders): порядок по умолчанию — после Spring Security */
+    /**
+     * Регистрация фильтра (только при функции orders): порядок по умолчанию — после Spring Security. Проверка ключа
+     * включается явно — awms.orders.callback-key-required=true в application.properties: до выключателей колбэки
+     * принимались без ключа, и внешняя система может его не присылать
+     */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnFeature(Feature.ORDERS)
+    @ConditionalOnProperty(name = "awms.orders.callback-key-required", havingValue = "true")
     public static class Registration {
 
         @Bean

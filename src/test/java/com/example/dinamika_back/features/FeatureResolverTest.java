@@ -1,11 +1,14 @@
 package com.example.dinamika_back.features;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.context.config.ConfigDataEnvironmentPostProcessor;
 import org.springframework.boot.env.PropertiesPropertySourceLoader;
 import org.springframework.boot.env.SystemEnvironmentPropertySourceEnvironmentPostProcessor;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertiesPropertySource;
@@ -31,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * Разбор потолка (раздел 5.2 проекта) на окружении, собранном как у службы: classpath application.properties
  * импортирует файл потолка по AWMS_FEATURES_FILE, окружение процесса и системные свойства задаёт тест.
  */
+@ExtendWith(OutputCaptureExtension.class)
 class FeatureResolverTest {
 
     @TempDir
@@ -39,17 +43,32 @@ class FeatureResolverTest {
     // ---------- Пресеты, переопределения, каскад ----------
 
     @Test
-    void withoutCeilingFileIsolatedPresetAndWarning() {
+    void withoutCeilingFileFullPresetAndWarning() {
+        // Без файла потолка сервер работает как до выключателей — пресет full; сузить набор можно только файлом
         StandardEnvironment env = environment(Map.of(), dir.resolve("missing.properties"));
         FeatureSnapshot s = resolve(env);
-        assertThat(s.preset()).isEqualTo(FeaturePreset.ISOLATED);
+        assertThat(s.preset()).isEqualTo(FeaturePreset.FULL);
         assertThat(s.presetSource()).isEqualTo("default");
         assertThat(s.ceilingFileExists()).isFalse();
-        assertThat(s.warnings()).anySatisfy(w -> assertThat(w).contains("Файл потолка не найден").contains("isolated"));
-        assertThat(Feature.values()).allSatisfy(f -> assertThat(s.isOn(f)).as(f.key()).isFalse());
-        // Ворота закрывают модули, ядро и служебные пути открыты
-        assertThat(s.closedRuleFor("GET", "/api/video/status", null)).isNotNull();
+        assertThat(s.warnings()).anySatisfy(w -> assertThat(w).contains("Файл потолка не найден").contains("full"));
+        assertThat(Feature.values()).allSatisfy(f ->
+                assertThat(s.isOn(f)).as(f.key()).isEqualTo(f.isOnIn(FeaturePreset.FULL)));
+        // Модули и ядро открыты; служебное (testsync) выключено и в full — его ворота закрыты
+        assertThat(s.closedRuleFor("GET", "/api/video/status", null)).isNull();
         assertThat(s.closedRuleFor("GET", "/api/nomenclature/tree", null)).isNull();
+        assertThat(s.closedRuleFor("POST", "/api/sync/receive", null)).isNotNull();
+    }
+
+    @Test
+    void ceilingFileWithoutPresetKeyMeansFull() throws IOException {
+        FeatureSnapshot s = resolve(environment(Map.of(), ceiling("awms.video.retention-days=30\n")));
+        assertThat(s.preset()).isEqualTo(FeaturePreset.FULL);
+        assertThat(s.presetSource()).isEqualTo("default");
+        assertThat(s.ceilingFileExists()).isTrue();
+        assertThat(s.warnings()).anySatisfy(w -> assertThat(w).contains("нет ключа awms.features.preset").contains("full"));
+        // Сузить набор — явным пресетом в файле
+        assertThat(resolve(environment(Map.of(), ceiling("awms.features.preset=isolated\n"))).isOn(Feature.VIDEO))
+                .isFalse();
     }
 
     @Test
@@ -216,62 +235,97 @@ class FeatureResolverTest {
     }
 
     @Test
-    void securityParametersCannotComeFromEnvironmentPropertiesOrArguments() throws IOException {
+    void securityParametersFromEnvironmentPropertiesOrArgumentsAreWarnedNotRejected(CapturedOutput output)
+            throws IOException {
+        // Как до выключателей: служба может задавать порт и т. п. окружением или аргументами — запуск не ломается,
+        // значение применяется, в лог идёт предупреждение с именем ключа и источником
         Path file = ceiling("awms.features.preset=full\n");
-        assertThatThrownBy(() -> resolve(environment(Map.of("SERVER_PORT", "9000"), file)))
-                .isInstanceOf(FeatureConfigurationException.class)
-                .hasMessageContaining("server.port").hasMessageContaining("SERVER_PORT");
-        assertThatThrownBy(() -> resolve(environment(Map.of("AWMS_VIDEO_RETENTION_DAYS", "5"), file)))
-                .isInstanceOf(FeatureConfigurationException.class)
-                .hasMessageContaining("awms.video.retention-days");
+        FeatureSnapshot fromEnv = resolve(environment(Map.of("SERVER_PORT", "9000"), file));
+        assertThat(fromEnv.param(CeilingParam.SERVER_PORT)).isEqualTo("9000");
+        assertThat(fromEnv.paramOrigin(CeilingParam.SERVER_PORT)).contains("SERVER_PORT");
+        assertThat(output.getAll()).contains("WARN").contains("server.port").contains("SERVER_PORT");
+
+        FeatureSnapshot retention = resolve(environment(Map.of("AWMS_VIDEO_RETENTION_DAYS", "5"), file));
+        assertThat(retention.intParam(CeilingParam.VIDEO_RETENTION_DAYS)).isEqualTo(5);
+        assertThat(output.getAll()).contains("awms.video.retention-days");
 
         Properties system = new Properties();
         system.setProperty("server.port", "9999");
-        assertThatThrownBy(() -> resolve(environment(Map.of(), file,
-                new PropertiesPropertySource(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME, system))))
-                .isInstanceOf(FeatureConfigurationException.class)
-                .hasMessageContaining("системное свойство");
+        FeatureSnapshot property = resolve(environment(Map.of(), file,
+                new PropertiesPropertySource(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME, system)));
+        assertThat(property.param(CeilingParam.SERVER_PORT)).isEqualTo("9999");
+        assertThat(output.getAll()).contains("-Dserver.port");
 
+        FeatureSnapshot argument = resolve(environment(Map.of(), file,
+                new SimpleCommandLinePropertySource("--server.port=9100")));
+        assertThat(argument.param(CeilingParam.SERVER_PORT)).isEqualTo("9100");
+        assertThat(output.getAll()).contains("--server.port");
+
+        // Выключатели функций окружением и аргументами — по-прежнему отказ запуска
         assertThatThrownBy(() -> resolve(environment(Map.of(), file,
                 new SimpleCommandLinePropertySource("--awms.features.video.enabled=false"))))
                 .isInstanceOf(FeatureConfigurationException.class)
                 .hasMessageContaining("аргумент командной строки");
+        Properties feature = new Properties();
+        feature.setProperty("awms.features.video.enabled", "false");
+        assertThatThrownBy(() -> resolve(environment(Map.of(), file,
+                new PropertiesPropertySource(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME, feature))))
+                .isInstanceOf(FeatureConfigurationException.class)
+                .hasMessageContaining("awms.features.video.enabled");
     }
 
     @Test
-    void otherConfigFileCannotCarryWhitelistKeys() throws IOException {
+    void otherConfigFileWithParameterIsWarnedButFeatureKeysAreRejected(CapturedOutput output) throws IOException {
         Path file = ceiling("awms.features.preset=full\n");
         Path other = dir.resolve("application.properties");
-        Files.writeString(other, "awms.cors.allowed-origins=http://evil\n");
+        Files.writeString(other, "awms.cors.allowed-origins=http://extra.example\n");
         PropertySource<?> otherSource = new PropertiesPropertySourceLoader()
                 .load("external", new FileSystemResource(other)).get(0);
-        assertThatThrownBy(() -> resolve(environment(Map.of(), file, otherSource)))
+        FeatureSnapshot s = resolve(environment(Map.of(), file, otherSource));
+        assertThat(s.listParam(CeilingParam.CORS_ALLOWED_ORIGINS)).containsExactly("http://extra.example");
+        assertThat(output.getAll()).contains("WARN").contains("awms.cors.allowed-origins");
+
+        Path withFeature = dir.resolve("other-features.properties");
+        Files.writeString(withFeature, "awms.features.video.enabled=false\n");
+        PropertySource<?> featureSource = new PropertiesPropertySourceLoader()
+                .load("external", new FileSystemResource(withFeature)).get(0);
+        assertThatThrownBy(() -> resolve(environment(Map.of(), file, featureSource)))
                 .isInstanceOf(FeatureConfigurationException.class)
-                .hasMessageContaining("awms.cors.allowed-origins");
+                .hasMessageContaining("awms.features.video.enabled");
     }
 
     @Test
-    void nonEnumerableSourceCannotCarryWhitelistKeys() throws IOException {
+    void nonEnumerableSourceCannotCarryFeatureKeys(CapturedOutput output) throws IOException {
         // Источник без перечня имён (как JNDI): verify() его не перебирает, действующее значение проверяет find()
         Path file = ceiling("awms.features.preset=full\n");
-        PropertySource<Object> jndiLike = new PropertySource<>("jndiProperties", new Object()) {
-            @Override
-            public Object getProperty(String name) {
-                return "awms.features.video.enabled".equals(name) ? "false" : null;
-            }
-        };
+        PropertySource<Object> jndiLike = jndiLike("awms.features.video.enabled", "false");
         assertThatThrownBy(() -> resolve(environment(Map.of(), file, jndiLike)))
                 .isInstanceOf(FeatureConfigurationException.class)
                 .hasMessageContaining("awms.features.video.enabled")
                 .hasMessageContaining("jndiProperties");
+        // Параметр безопасности из такого источника — как из окружения: применяется с предупреждением
+        FeatureSnapshot port = resolve(environment(Map.of(), file, jndiLike("server.port", "9200")));
+        assertThat(port.param(CeilingParam.SERVER_PORT)).isEqualTo("9200");
+        assertThat(output.getAll()).contains("server.port").contains("jndiProperties");
+    }
+
+    private static PropertySource<Object> jndiLike(String key, String value) {
+        return new PropertySource<>("jndiProperties", new Object()) {
+            @Override
+            public Object getProperty(String name) {
+                return key.equals(name) ? value : null;
+            }
+        };
     }
 
     @Test
-    void ffprobePathIsCeilingParameter() throws IOException {
+    void ffprobePathIsCeilingParameter(CapturedOutput output) throws IOException {
         Path file = ceiling("awms.features.preset=full\n");
-        assertThatThrownBy(() -> resolve(environment(Map.of("VIDEO_FFPROBE_PATH", "C:/evil/ffprobe.exe"), file)))
-                .isInstanceOf(FeatureConfigurationException.class)
-                .hasMessageContaining("video.ffprobe-path").hasMessageContaining("VIDEO_FFPROBE_PATH");
+        // Из окружения — применяется с предупреждением (как остальные параметры белого списка), источник виден в отчёте
+        FeatureSnapshot fromEnv = resolve(environment(Map.of("VIDEO_FFPROBE_PATH", "C:/other/ffprobe.exe"), file));
+        assertThat(fromEnv.param(CeilingParam.VIDEO_FFPROBE_PATH)).isEqualTo("C:/other/ffprobe.exe");
+        assertThat(fromEnv.paramOrigin(CeilingParam.VIDEO_FFPROBE_PATH)).contains("VIDEO_FFPROBE_PATH");
+        assertThat(output.getAll()).contains("video.ffprobe-path").contains("VIDEO_FFPROBE_PATH");
         FeatureSnapshot byDefault = resolve(environment(Map.of(), file));
         assertThat(byDefault.param(CeilingParam.VIDEO_FFPROBE_PATH)).isEmpty();
         FeatureSnapshot fromFile = resolve(environment(Map.of(), ceiling(
@@ -299,9 +353,18 @@ class FeatureResolverTest {
         assertThat(s.intParam(CeilingParam.VIDEO_RETENTION_DAYS)).isEqualTo(30);
         assertThat(s.param(CeilingParam.ADMIN_MODE)).isEqualTo("disable-only");
         assertThat(s.param(CeilingParam.ADMIN_DISABLE_ROLES)).isEqualTo("ADMIN,SECURITY");
+        // Как до выключателей: пустые списки — без ограничений, WebSocket — с любого источника,
+        // дополнительных адресов CORS нет (прежний список — в SecurityConfig)
         assertThat(s.param(CeilingParam.NETWORK_OUTBOUND_ALLOWED)).isEmpty();
-        assertThat(s.listParam(CeilingParam.WEBSOCKET_ALLOWED_ORIGINS))
-                .isEqualTo(s.listParam(CeilingParam.CORS_ALLOWED_ORIGINS));
+        assertThat(s.param(CeilingParam.VIDEO_ALLOWED_NETWORKS)).isEmpty();
+        assertThat(s.listParam(CeilingParam.CORS_ALLOWED_ORIGINS)).isEmpty();
+        assertThat(s.listParam(CeilingParam.WEBSOCKET_ALLOWED_ORIGINS)).containsExactly("*");
+        assertThat(s.paramOrigin(CeilingParam.WEBSOCKET_ALLOWED_ORIGINS)).contains("любой источник");
+        // Явный список в файле потолка ограничивает
+        FeatureSnapshot ws = resolve(environment(Map.of(), ceiling(
+                "awms.features.preset=full\nawms.websocket.allowed-origins=https://awms.zavod.local\n")));
+        assertThat(ws.listParam(CeilingParam.WEBSOCKET_ALLOWED_ORIGINS)).containsExactly("https://awms.zavod.local");
+        assertThat(ws.paramOrigin(CeilingParam.WEBSOCKET_ALLOWED_ORIGINS)).startsWith("файл ");
         // Из умолчаний jar
         assertThat(s.param(CeilingParam.SERVER_PORT)).isEqualTo("8084");
         assertThat(s.paramOrigin(CeilingParam.SERVER_PORT)).isEqualTo("jar: умолчание");

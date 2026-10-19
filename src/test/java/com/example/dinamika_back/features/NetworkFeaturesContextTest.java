@@ -150,14 +150,33 @@ class NetworkFeaturesContextTest {
                     RestTemplate client = context.getBean(RestTemplate.class);
                     assertThat(client.getInterceptors()).singleElement().isInstanceOfSatisfying(OutboundGuard.class,
                             guard -> assertThat(guard.feature()).isEqualTo(Feature.ORDERS));
+                    // Проверка ключа колбэков не включена явно — колбэки принимаются без ключа, как до выключателей
+                    assertThat(context).doesNotHaveBean("ordersCallbackKeyFilter");
+                    // Тестовая синхронизация выключена и в full
+                    for (Class<?> bean : TESTSYNC_BEANS) assertThat(context).doesNotHaveBean(bean);
+                });
+    }
+
+    @Test
+    void callbackKeyFilterOnlyWhenRequiredExplicitly() {
+        runner().withPropertyValues("awms.features.preset=full", "awms.features.websocket.enabled=false",
+                        "awms.orders.callback-key-required=true")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
                     // Фильтр ключа колбэков — после Spring Security (порядок по умолчанию)
                     FilterRegistrationBean<?> filter = context.getBean("ordersCallbackKeyFilter",
                             FilterRegistrationBean.class);
                     assertThat(filter.getFilter()).isInstanceOf(OrdersCallbackKeyFilter.class);
                     assertThat(((OrdersCallbackKeyFilter) filter.getFilter()).hasKey()).isTrue();
                     assertThat(filter.getOrder()).isGreaterThan(SecurityProperties.DEFAULT_FILTER_ORDER);
-                    // Тестовая синхронизация выключена и в full
-                    for (Class<?> bean : TESTSYNC_BEANS) assertThat(context).doesNotHaveBean(bean);
+                });
+        // Без функции orders фильтра нет и при включённой проверке
+        runner().withPropertyValues("awms.features.preset=standard", "awms.orders.callback-key-required=true")
+                .run(context -> assertNoNetworkModules(context, "standard"));
+        runner().withPropertyValues("awms.features.preset=full", "awms.orders.callback-key-required=false")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).doesNotHaveBean("ordersCallbackKeyFilter");
                 });
     }
 
@@ -172,13 +191,13 @@ class NetworkFeaturesContextTest {
 
             AbstractSockJsService sockJs = sockJsService(context);
             assertThat(sockJs.getSockJsClientLibraryUrl()).isEqualTo("/vendor/sockjs/sockjs.min.js");
-            // awms.websocket.allowed-origins не задан — список CORS (умолчание кода), без «*»
-            assertThat(sockJs.getAllowedOriginPatterns()).containsExactlyInAnyOrder("http://localhost",
-                    "http://localhost:3000", "http://127.0.0.1:3000");
+            // awms.websocket.allowed-origins не задан — любой источник, как до выключателей
+            assertThat(sockJs.getAllowedOriginPatterns()).containsExactly("*");
             assertThat(sockJs.getAllowedOrigins()).isEmpty();
             // Префикса /app нет: обработчиков @MessageMapping в коде нет
             assertThat(context.getBean(SimpAnnotationMethodMessageHandler.class).getDestinationPrefixes()).isEmpty();
         });
+        // Явный список в потолке ограничивает источники
         runner().withPropertyValues("awms.features.preset=full",
                 "awms.websocket.allowed-origins=https://awms.zavod.local").run(context ->
                 assertThat(sockJsService(context).getAllowedOriginPatterns())

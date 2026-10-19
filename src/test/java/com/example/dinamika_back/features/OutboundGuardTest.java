@@ -55,8 +55,9 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
- * Сторож исходящих HTTP (пакет B3): запрос не уходит, если функция клиента выключена, хоста:порта нет
- * в {@code awms.network.outbound.allowed} или клиент не привязан к функции; разрешённый запрос пишет
+ * Сторож исходящих HTTP (пакет B3): запрос не уходит, если функция клиента выключена, список
+ * {@code awms.network.outbound.allowed} задан и хоста:порта в нём нет, или клиент не привязан к функции. Пустой
+ * список (умолчание) адреса не ограничивает — как до выключателей; схема — только http и https. Разрешённый запрос пишет
  * {@code OUTBOUND_SENT} без строки запроса и учётных данных; редиректы не выполняются.
  * Клиент — тот же, что в службе ({@link RestTemplateConfig}); MockRestServiceServer подменяет только фабрику
  * соединений, перехватчики остаются.
@@ -113,19 +114,39 @@ class OutboundGuardTest {
         assertThat(details).containsEntry("status", 200).containsEntry("method", "POST").containsKey("size");
     }
 
+    @Test
+    void emptyAllowListDoesNotLimitOutboundWithOrdersOn() {
+        RecordingAudit audit = new RecordingAudit();
+        // Умолчание потолка: awms.network.outbound.allowed пуст — исходящие не ограничены, как до выключателей
+        RestTemplate client = ordersClient(features("awms.features.preset=full"), audit);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(client).build();
+        server.expect(requestTo("http://saas.example.org/v1/orders/u1")).andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        client.postForEntity("http://saas.example.org/v1/orders/u1", Map.of(), String.class);
+
+        server.verify();
+        // Журнал исходящих пишется и без списка
+        assertThat(audit.events).singleElement().satisfies(event -> {
+            assertThat(event[0]).isEqualTo(AccessAudit.Event.OUTBOUND_SENT);
+            assertThat(event[2]).isEqualTo("http://saas.example.org/v1/orders/u1");
+        });
+    }
+
     // ==================== Заблокировано: запрос не уходит ====================
 
     @Test
-    void emptyAllowListBlocksEvenWithOrdersOn() {
+    void explicitAllowListBlocksOtherHosts() {
         RecordingAudit audit = new RecordingAudit();
-        // Умолчание потолка: awms.network.outbound.allowed пуст
-        RestTemplate client = ordersClient(features("awms.features.preset=full"), audit);
+        // Список задан явно — чужой адрес не уходит
+        RestTemplate client = ordersClient(features("awms.features.preset=full",
+                "awms.network.outbound.allowed=saas.example.org:443"), audit);
         MockRestServiceServer server = MockRestServiceServer.bindTo(client).build();
 
         assertThatThrownBy(() -> client.postForEntity(SAAS + "/v1/orders/u1", Map.of(), String.class))
                 .isInstanceOf(ResourceAccessException.class)
                 .hasCauseInstanceOf(OutboundGuard.OutboundBlockedException.class)
-                .hasMessageContaining("пуст");
+                .hasMessageContaining("localhost:8085").hasMessageContaining("awms.network.outbound.allowed");
         server.verify();   // ожиданий нет: дошедший до сервера запрос провалил бы тест
         assertThat(audit.events).isEmpty();
     }
@@ -146,16 +167,19 @@ class OutboundGuardTest {
 
     @Test
     void ordersOffAnswers404AndSendsNothing() {
-        RecordingAudit audit = new RecordingAudit();
-        // standard: заказов нет, даже если адрес в списке
-        RestTemplate client = ordersClient(features("awms.features.preset=standard",
-                "awms.network.outbound.allowed=localhost:8085"), audit);
-        MockRestServiceServer server = MockRestServiceServer.bindTo(client).build();
+        // standard: заказов нет, даже если адрес в списке или список не задан (исходящие не ограничены)
+        for (FeatureService features : List.of(
+                features("awms.features.preset=standard", "awms.network.outbound.allowed=localhost:8085"),
+                features("awms.features.preset=standard"))) {
+            RecordingAudit audit = new RecordingAudit();
+            RestTemplate client = ordersClient(features, audit);
+            MockRestServiceServer server = MockRestServiceServer.bindTo(client).build();
 
-        assertThatThrownBy(() -> client.postForEntity(SAAS + "/v1/orders/u1", Map.of(), String.class))
-                .isInstanceOf(FeatureDisabledException.class);
-        server.verify();
-        assertThat(audit.events).isEmpty();
+            assertThatThrownBy(() -> client.postForEntity(SAAS + "/v1/orders/u1", Map.of(), String.class))
+                    .isInstanceOf(FeatureDisabledException.class);
+            server.verify();
+            assertThat(audit.events).isEmpty();
+        }
     }
 
     @Test
@@ -187,8 +211,11 @@ class OutboundGuardTest {
         // Похожие имена не проходят
         assertThat(OutboundGuard.check(URI.create("http://localhost.evil.example:8085/"), list)).isNotNull();
         assertThat(OutboundGuard.check(URI.create("http://saas.example.org.evil:80/"), list)).isNotNull();
-        // Пустой список — запрещено всё
-        assertThat(OutboundGuard.check(URI.create("http://localhost:8085/"), List.of())).contains("пуст");
+        // Пустой список — адреса не ограничены (как до выключателей), но схема — по-прежнему только http и https
+        assertThat(OutboundGuard.check(URI.create("http://localhost:8085/"), List.of())).isNull();
+        assertThat(OutboundGuard.check(URI.create("https://saas.example.org/v1"), List.of())).isNull();
+        assertThat(OutboundGuard.check(URI.create("ftp://localhost:8085/x"), List.of())).contains("схема");
+        assertThat(OutboundGuard.check(URI.create("file:///etc/passwd"), List.of())).isNotNull();
     }
 
     private static String check(String url) {
@@ -302,7 +329,9 @@ class OutboundGuardTest {
 
     @Test
     void blockedOrderIsNotSavedAndNotPublished() {
-        RestTemplate client = ordersClient(features("awms.features.preset=full"), new RecordingAudit());
+        // Список задан явно, адреса системы заказов в нём нет
+        RestTemplate client = ordersClient(features("awms.features.preset=full",
+                "awms.network.outbound.allowed=saas.example.org:443"), new RecordingAudit());
         MockRestServiceServer server = MockRestServiceServer.bindTo(client).build();
         LiveUpdates live = mock(LiveUpdates.class);
         OrderService service = orderService(client, live);

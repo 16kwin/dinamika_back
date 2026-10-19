@@ -34,17 +34,16 @@ public enum CeilingParam {
      * без белого списка VIDEO_FFPROBE_PATH подменял бы его мимо потолка и отпечатка
      */
     VIDEO_FFPROBE_PATH("video.ffprobe-path", "", Type.TEXT),
-    /** Адреса фронтенда для CORS (B5); стенд добавляет свои адреса в потолке */
-    CORS_ALLOWED_ORIGINS("awms.cors.allowed-origins", "http://localhost:3000,http://127.0.0.1:3000,http://localhost",
-            Type.LIST),
-    /** Адреса для WebSocket (B3); пусто — те же, что у CORS */
+    /** Дополнительные адреса фронтенда для CORS: прежний список сервера и стенда — в SecurityConfig, эти добавляются к нему */
+    CORS_ALLOWED_ORIGINS("awms.cors.allowed-origins", "", Type.LIST),
+    /** Адреса для WebSocket (B3); не задано — любой источник, как до выключателей */
     WEBSOCKET_ALLOWED_ORIGINS("awms.websocket.allowed-origins", null, Type.LIST),
-    /** Разрешённые исходящие host:port (B3); пусто — исходящих HTTP нет даже при включённых заказах */
+    /** Разрешённые исходящие host:port (B3); пусто — не ограничены, как до выключателей (заказы ходят в sync.service.url) */
     NETWORK_OUTBOUND_ALLOWED("awms.network.outbound.allowed", "", Type.LIST),
     /** Источники file: и test: у камер (B2) */
     VIDEO_ALLOW_FILE_SOURCE("awms.video.allow-file-source", "false", Type.BOOL),
     /** Сети камер (B2): проверяются по разрешённому IP в момент запуска ffmpeg */
-    VIDEO_ALLOWED_NETWORKS("awms.video.allowed-networks", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16", Type.LIST),
+    VIDEO_ALLOWED_NETWORKS("awms.video.allowed-networks", "", Type.LIST),
     /** Срок хранения видео, дней (B11): действует при любом состоянии video, «бессрочно» не допускается */
     VIDEO_RETENTION_DAYS("awms.video.retention-days", "30", Type.INT, 1, 3650),
     /** Стереть пароли камер при старте с выключенным video (B11) */

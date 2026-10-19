@@ -227,11 +227,14 @@ class VideoFeatureContextTest {
         verify(cameraRepository).save(any());
     }
 
+    /** Сети камер, заданные в потолке явно: частные сети RFC 1918 */
+    private static final String PRIVATE_NETWORKS = "awms.video.allowed-networks=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16";
+
     @Test
     void cameraOutsideAllowedNetworksIsRefusedAfterNameResolutionBeforeFfmpeg() {
-        // localhost разрешается в 127.0.0.1 / ::1 — вне частных сетей RFC 1918 (умолчание потолка)
+        // localhost разрешается в 127.0.0.1 / ::1 — вне частных сетей RFC 1918, заданных в потолке
         when(cameraRepository.findById(1L)).thenReturn(Optional.of(camera("rtsp://admin:p@localhost:554/s")));
-        runner().withPropertyValues("awms.features.preset=full").run(context -> {
+        runner().withPropertyValues("awms.features.preset=full", PRIVATE_NETWORKS).run(context -> {
             VideoCameraService cameras = context.getBean(VideoCameraService.class);
             LiveStreamService live = context.getBean(LiveStreamService.class);
             assertThatThrownBy(() -> cameras.snapshot(1L))
@@ -251,11 +254,25 @@ class VideoFeatureContextTest {
 
         // Камера в разрешённой сети проходит проверку — дальше запуск FFmpeg (его на этом пути нет → 503)
         when(cameraRepository.findById(1L)).thenReturn(Optional.of(camera("rtsp://admin:p@192.168.1.64:554/s")));
-        runner().withPropertyValues("awms.features.preset=full").run(context ->
+        runner().withPropertyValues("awms.features.preset=full", PRIVATE_NETWORKS).run(context ->
                 assertThatThrownBy(() -> context.getBean(VideoCameraService.class).snapshot(1L))
                         .isInstanceOf(VideoException.class)
                         .hasMessageContaining("Не найден FFmpeg")
                         .satisfies(e -> assertThat(statusOf(e)).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)));
+    }
+
+    @Test
+    void withoutCeilingNetworksCameraInAnyNetworkReachesFfmpeg() {
+        // awms.video.allowed-networks не задан — сети камер не ограничены, как до выключателей: камера на localhost
+        // проходит проверку источника, дальше запуск FFmpeg (его на этом пути нет → 503)
+        when(cameraRepository.findById(1L)).thenReturn(Optional.of(camera("rtsp://admin:p@localhost:554/s")));
+        runner().withPropertyValues("awms.features.preset=full").run(context -> {
+            assertThat(context.getBean(VideoSettings.class).sourcePolicy().networks()).isEmpty();
+            assertThatThrownBy(() -> context.getBean(VideoCameraService.class).snapshot(1L))
+                    .isInstanceOf(VideoException.class)
+                    .hasMessageContaining("Не найден FFmpeg")
+                    .satisfies(e -> assertThat(statusOf(e)).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+        });
     }
 
     @Test
