@@ -1,4 +1,4 @@
--- V16__Nomenclature_models.sql
+-- V22__Nomenclature_models.sql
 -- 3D-модели номенклатуры: исходный файл из САПР и облегчённая копия GLB для просмотра в браузере.
 --
 -- Файлы лежат не в публичном uploads/, а в каталоге nomenclature.models-dir и отдаются

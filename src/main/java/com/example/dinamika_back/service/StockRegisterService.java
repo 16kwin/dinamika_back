@@ -133,7 +133,6 @@ public class StockRegisterService {
         int cleanAfter = cleanBefore - qty;
         int reservedAfter = reservedBefore + qty;
 
-        // 1) детальная запись брони
         RegStockReservation reservation = RegStockReservation.builder()
                 .docRefill(DocRefill.builder().uid(docRefillUid).build())
                 .material(previous.getMaterial())
@@ -143,10 +142,8 @@ public class StockRegisterService {
                 .build();
         RegStockReservation savedRes = reservationRepository.save(reservation);
 
-        // 2) НОВАЯ строка состояния (не update)
         RegStockBalance next = pushNewBalance(previous, cleanAfter, reservedAfter, materialUid, stockUid);
 
-        // 3) НОВАЯ запись движения (DRAFT) — REFILL, списание с MAIN
         createRefillMovementDraft(docRefillUid, materialUid, stockUid, qty, author);
 
         logStockEvent(
@@ -174,7 +171,6 @@ public class StockRegisterService {
 
         reservationRepository.deleteActiveByDocRefillUid(docRefillUid);
 
-        // Удаляем DRAFT-движения документа
         stockMovementRepository.deleteDraftByDocUid(docRefillUid);
     }
 
@@ -288,7 +284,7 @@ public class StockRegisterService {
         );
     }
 
-    // ==================== ПРОВЕДЕНИЕ ====================
+    // ==================== ПРОВЕДЕНИЕ ПОПОЛНЕНИЯ ====================
 
     @Transactional
     public void commitByDoc(UUID docRefillUid, String author) {
@@ -297,7 +293,6 @@ public class StockRegisterService {
         List<RegStockReservation> reservations = reservationRepository.findByDocRefillUidAndBlockedFalse(docRefillUid);
         if (reservations.isEmpty()) return;
 
-        // Группируем по номенклатуре (склад = MAIN, потому что все брони пополнения — на MAIN)
         Map<UUID, Integer> byMaterial = new LinkedHashMap<>();
         for (RegStockReservation r : reservations) {
             UUID materialUid = r.getMaterial().getUid();
@@ -310,15 +305,14 @@ public class StockRegisterService {
             return;
         }
 
-        // Получаем документ пополнения (для кода и для станции)
         DocRefill doc = docRefillRepository.findById(docRefillUid).orElse(null);
         String stationUid = doc != null ? doc.getStationUid() : null;
         Integer docCode = doc != null ? doc.getCode() : null;
 
-        // === ОДИН документ перемещения на всё пополнение ===
         DocTransfer transfer = null;
         if (stationUid != null) {
             transfer = DocTransfer.builder()
+                    .uid(UUID.randomUUID())
                     .code(nextTransferCode())
                     .docDatetime(LocalDateTime.now())
                     .docBaseUid(docRefillUid)
@@ -334,7 +328,6 @@ public class StockRegisterService {
             UUID materialUid = e.getKey();
             int qty = e.getValue();
 
-            // 1) MAIN: фиксируем состояние (clean уже уменьшен при брони, тут только reserved −qty)
             RegStockBalance previousMain = getLastBalance(materialUid, MAIN_STOCK);
             if (previousMain != null) {
                 int cleanBefore = previousMain.getCleanQuantity() != null ? previousMain.getCleanQuantity() : 0;
@@ -352,24 +345,19 @@ public class StockRegisterService {
                 );
             }
 
-            // 2) REFILL-движение на MAIN: DRAFT → POSTED (оставляем как историю пополнения)
             markRefillMovementPosted(docRefillUid, materialUid);
 
-            // 3) Если есть станция — TRANSFER: два движения под одним doc_transfer
             if (stationUid != null && transfer != null) {
-                // 3.1) списание с MAIN
                 createMovementPosted(
                         transfer.getUid(), "TRANSFER", transfer.getCode(),
-                        docRefillUid, docCode,
+                        docRefillUid, docCode, "REFILL",
                         materialUid, MAIN_STOCK, -qty, author);
 
-                // 3.2) приход на станцию
                 createMovementPosted(
                         transfer.getUid(), "TRANSFER", transfer.getCode(),
-                        docRefillUid, docCode,
+                        docRefillUid, docCode, "REFILL",
                         materialUid, stationUid, +qty, author);
 
-                // 3.3) новая запись состояния на станцию (+qty к clean)
                 RegStockBalance prevStation = ensureBalance(materialUid, stationUid);
                 int cleanStationBefore = prevStation.getCleanQuantity() != null ? prevStation.getCleanQuantity() : 0;
                 int reservedStationBefore = prevStation.getReservedQuantity() != null ? prevStation.getReservedQuantity() : 0;
@@ -388,8 +376,93 @@ public class StockRegisterService {
             }
         }
 
-        // 4) закрываем все брони документа
         reservationRepository.blockByDocRefillUid(docRefillUid);
+    }
+
+    // ==================== ПРОВЕДЕНИЕ ПЕРЕМЕЩЕНИЯ (заказ) ====================
+
+    /**
+     * Двигает остатки по паре (stockFrom → stockTo) на основании строк transfer.
+     * Вызывается из MoveOrderService при закрытии doc_transfer.
+     * Возвращает false, если остатков не хватает — тогда transfer не закрывается.
+     */
+    @Transactional
+    public boolean applyTransferMovements(DocTransfer transfer,
+                                          List<RegTransferLine> lines,
+                                          UUID docBaseUid,
+                                          Integer docBaseCode,
+                                          String docBaseType,
+                                          String author) {
+        if (transfer == null || lines == null || lines.isEmpty()) return false;
+
+        String stockFrom = transfer.getStockFromUid();
+        String stockTo = transfer.getStockToUid();
+        if (stockFrom == null || stockTo == null) return false;
+
+        // 1) Проверка доступности на отправителе
+        for (RegTransferLine l : lines) {
+            if (l.getMaterial() == null) continue;
+            int qty = l.getQuantity() != null ? l.getQuantity() : 0;
+            if (qty <= 0) continue;
+            Integer available = getAvailableQuantity(l.getMaterial().getUid(), stockFrom);
+            if (available == null || available < qty) {
+                return false;
+            }
+        }
+
+        // 2) Двигаем остатки
+        for (RegTransferLine l : lines) {
+            if (l.getMaterial() == null) continue;
+            UUID materialUid = l.getMaterial().getUid();
+            int qty = l.getQuantity() != null ? l.getQuantity() : 0;
+            if (qty <= 0) continue;
+
+            // 2.1) Списание с отправителя
+            RegStockBalance prevFrom = ensureBalance(materialUid, stockFrom);
+            int fromCleanBefore = prevFrom.getCleanQuantity() != null ? prevFrom.getCleanQuantity() : 0;
+            int fromReservedBefore = prevFrom.getReservedQuantity() != null ? prevFrom.getReservedQuantity() : 0;
+            int fromCleanAfter = fromCleanBefore - qty;
+
+            RegStockBalance nextFrom = pushNewBalance(
+                    prevFrom, fromCleanAfter, fromReservedBefore, materialUid, stockFrom);
+
+            logStockEvent(
+                    nextFrom.getUid(), null, materialUid, docBaseUid,
+                    "TRANSFER_OUT",
+                    "Списание с " + stockFrom + " по перемещению " + transfer.getCode() + ": " + qty + " ед.",
+                    "cleanQuantity", String.valueOf(fromCleanBefore), String.valueOf(fromCleanAfter),
+                    author
+            );
+
+            createMovementPosted(
+                    transfer.getUid(), "TRANSFER", transfer.getCode(),
+                    docBaseUid, docBaseCode, docBaseType,
+                    materialUid, stockFrom, -qty, author);
+
+            // 2.2) Приход на получателя
+            RegStockBalance prevTo = ensureBalance(materialUid, stockTo);
+            int toCleanBefore = prevTo.getCleanQuantity() != null ? prevTo.getCleanQuantity() : 0;
+            int toReservedBefore = prevTo.getReservedQuantity() != null ? prevTo.getReservedQuantity() : 0;
+            int toCleanAfter = toCleanBefore + qty;
+
+            RegStockBalance nextTo = pushNewBalance(
+                    prevTo, toCleanAfter, toReservedBefore, materialUid, stockTo);
+
+            logStockEvent(
+                    nextTo.getUid(), null, materialUid, docBaseUid,
+                    "TRANSFER_IN",
+                    "Приход на " + stockTo + " по перемещению " + transfer.getCode() + ": " + qty + " ед.",
+                    "cleanQuantity", String.valueOf(toCleanBefore), String.valueOf(toCleanAfter),
+                    author
+            );
+
+            createMovementPosted(
+                    transfer.getUid(), "TRANSFER", transfer.getCode(),
+                    docBaseUid, docBaseCode, docBaseType,
+                    materialUid, stockTo, +qty, author);
+        }
+
+        return true;
     }
 
     private Integer nextTransferCode() {
@@ -438,9 +511,12 @@ public class StockRegisterService {
         }
     }
 
-    /** POSTED-движение по перемещению (одно из двух: MAIN −qty или станция +qty). */
+    /**
+     * POSTED-движение по перемещению (одно из двух: from −qty или to +qty).
+     * docBaseType — 'REFILL' или 'MOVE_ORDER'.
+     */
     private void createMovementPosted(UUID transferUid, String docType, Integer docCode,
-                                      UUID docRefillUid, Integer docRefillCode,
+                                      UUID docBaseUid, Integer docBaseCode, String docBaseType,
                                       UUID materialUid, String stockUid, int qty,
                                       String author) {
         SprMaterial material = materialRepository.findById(materialUid).orElse(null);
@@ -450,8 +526,8 @@ public class StockRegisterService {
                 .docUid(transferUid)
                 .docType(docType)
                 .docCode(docCode)
-                .docBaseUid(docRefillUid)
-                .docBaseType("REFILL")
+                .docBaseUid(docBaseUid)
+                .docBaseType(docBaseType)
                 .stockUid(stockUid)
                 .material(material)
                 .quantity(qty)

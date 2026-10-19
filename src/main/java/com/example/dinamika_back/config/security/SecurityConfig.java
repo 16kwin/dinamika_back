@@ -1,4 +1,4 @@
-// SecurityConfig.java — ПОЛНЫЙ ФАЙЛ
+// SecurityConfig.java — ПОЛНЫЙ ФАЙЛ (добавлены /api/employees/**)
 package com.example.dinamika_back.config.security;
 
 import com.example.dinamika_back.features.CeilingParam;

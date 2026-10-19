@@ -36,7 +36,7 @@ public final class AppRoles {
     public static final Set<String> FEATURE_ENABLERS = Set.of(SECURITY);
 
     /**
-     * Роли, которые знает код, с названиями для матрицы ролей: ADMIN и OPERATOR — V1, DIRECTOR — V14,
+     * Роли, которые знает код, с названиями для матрицы ролей: ADMIN и OPERATOR — V1, DIRECTOR — V20,
      * SECURITY — пользователей заводит команда create-user (B10). Порядок — как в отчёте
      */
     public static final Map<String, String> KNOWN = known();

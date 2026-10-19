@@ -104,7 +104,7 @@ class NomenclatureSecurityTest {
     void otherReferenceBooksFollowTheSameRule() throws Exception {
         // Контроллеров этих справочников в срезе нет: 404 — запрос прошёл защиту, 403 — защита его отклонила
         for (String url : List.of("/api/templates/x", "/api/enterprises/1", "/api/workshops/1", "/api/sections/1",
-                "/api/station-types/x", "/api/station-manufacturers/x", "/api/station-models/x",
+                "/api/employees/1", "/api/station-types/x", "/api/station-manufacturers/x", "/api/station-models/x",
                 "/api/station-configurations/x", "/api/stations/crud/x")) {
             mvc.perform(get(url)).andExpect(status().isNotFound());
             mvc.perform(delete(url).with(csrf())).andExpect(status().isForbidden());

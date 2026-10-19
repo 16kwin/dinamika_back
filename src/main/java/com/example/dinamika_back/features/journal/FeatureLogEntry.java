@@ -14,9 +14,9 @@ import org.springframework.data.domain.Persistable;
 import java.time.LocalDateTime;
 
 /**
- * Запись журнала профиля {@code sys_feature_log} (V18): только добавление, строки связаны HMAC-цепочкой
+ * Запись журнала профиля {@code sys_feature_log} (V24): только добавление, строки связаны HMAC-цепочкой
  * ({@link JournalHmac}). Пишет только {@link FeatureJournal}: номер и время задаются до вставки, потому что входят
- * в хэш строки. Изменить или удалить запись приложение не может ({@code @Immutable}), база — тоже (триггеры V18).
+ * в хэш строки. Изменить или удалить запись приложение не может ({@code @Immutable}), база — тоже (триггеры V24).
  */
 @Entity
 @Immutable
@@ -26,7 +26,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 public class FeatureLogEntry implements Persistable<Long> {
 
-    /** Типы событий журнала профиля: перечень закрыт CHECK в V18, новый тип — осознанная миграция */
+    /** Типы событий журнала профиля: перечень закрыт CHECK в V24, новый тип — осознанная миграция */
     public enum Type {
         STARTUP, CEILING_CHANGED, SWITCH, TAMPER, PURGE, RETENTION, CREDENTIALS_PURGED, USER_CREATED,
         REPORT_VIEWED, REPORT_PRINTED, REPORT_EXPORTED, PROBE_RUN, DENIED_SUMMARY, OUTBOUND_BLOCKED

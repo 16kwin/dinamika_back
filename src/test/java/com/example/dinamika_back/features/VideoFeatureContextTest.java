@@ -345,7 +345,8 @@ class VideoFeatureContextTest {
         LiveStreamService live = mock(LiveStreamService.class);
         VideoCameraService cameras = mock(VideoCameraService.class);
         VideoArchiveService archive = mock(VideoArchiveService.class);
-        MockMvc mvc = gatedController(VideoTestFeatures.FULL, cameras, live, archive);
+        MockMvc mvc = gatedController(new FeatureService(FeatureResolver.fromProperties(Map.of("awms.features.preset", "full"))),
+                cameras, live, archive);
         for (String path : List.of("/api/video/cameras/1/live", "/api/video/cameras/1/snapshot",
                 "/api/video/files/1/content", "/api/video/files/1/download", "/api/video/clips/abc/download")) {
             mvc.perform(head(path)).andExpect(status().isMethodNotAllowed()).andExpect(header().string("Allow", "GET"));

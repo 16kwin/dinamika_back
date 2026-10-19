@@ -11,7 +11,7 @@ import java.util.Optional;
 
 /**
  * Журнал профиля {@code sys_feature_log}. Только вставка и чтение: методов изменения и удаления нет
- * (база их тоже отклоняет триггерами V18). Базовый интерфейс — {@link Repository}, а не JpaRepository:
+ * (база их тоже отклоняет триггерами V24). Базовый интерфейс — {@link Repository}, а не JpaRepository:
  * наружу открыто ровно то, что нужно журналу, и тесты подставляют свою реализацию в памяти.
  */
 public interface FeatureLogRepository extends Repository<FeatureLogEntry, Long> {

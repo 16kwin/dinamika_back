@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.core.type.classreading.MetadataReader;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.stereotype.Controller;
 import org.springframework.util.ClassUtils;
@@ -260,8 +261,15 @@ class FeatureCatalogContractTest {
 
     /** Маршруты контроллеров приложения: путь с {переменными} → 1 и методы */
     private static List<Route> routes() {
-        ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(false);
-        scanner.addIncludeFilter(new AnnotationTypeFilter(Controller.class));
+        AnnotationTypeFilter controllers = new AnnotationTypeFilter(Controller.class);
+        ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(false) {
+            // Условия @ConditionalOnFeature не проверяются: без файла потолка сканер видит пресет isolated и пропустил
+            // бы контроллеры функций, а правило ворот должно совпадать с настоящим маршрутом при любом потолке
+            @Override
+            protected boolean isCandidateComponent(MetadataReader reader) throws IOException {
+                return controllers.match(reader, getMetadataReaderFactory());
+            }
+        };
         List<Route> routes = new ArrayList<>();
         for (BeanDefinition bd : scanner.findCandidateComponents("com.example.dinamika_back")) {
             Class<?> type = ClassUtils.resolveClassName(bd.getBeanClassName(), FeatureCatalogContractTest.class.getClassLoader());

@@ -46,7 +46,7 @@ class LegacyAnonymousAccessTest {
         for (String url : List.of("/api/locations/hierarchy", "/api/stations/static", "/api/stations/static/1",
                 "/api/stations/dynamic", "/api/stations/dynamic/1", "/uploads/photo.png", "/ws-stations/info",
                 "/api/nomenclature/tree", "/api/nomenclature/models", "/api/templates/x", "/api/enterprises/1",
-                "/api/workshops/1", "/api/sections/1", "/api/station-types/x", "/api/station-manufacturers/x",
+                "/api/workshops/1", "/api/sections/1", "/api/employees/1", "/api/station-types/x", "/api/station-manufacturers/x",
                 "/api/station-models/x", "/api/station-configurations/x", "/api/stations/crud/x",
                 "/api/orders/active", "/api/tkp/active", "/api/dashboard/control-events")) {
             mvc.perform(get(url)).andExpect(status().isOk());

@@ -9,7 +9,7 @@ import java.util.List;
 
 /**
  * Журнал доступа {@code sys_access_log}: только вставка и чтение, методов изменения и удаления нет
- * (база их тоже отклоняет триггерами V18).
+ * (база их тоже отклоняет триггерами V24).
  */
 public interface AccessLogRepository extends Repository<AccessLogEntry, Long> {
 

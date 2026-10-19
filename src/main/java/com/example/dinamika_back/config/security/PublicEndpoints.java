@@ -102,6 +102,7 @@ public final class PublicEndpoints {
             "/api/enterprises/**",
             "/api/workshops/**",
             "/api/sections/**",
+            "/api/employees/**",
             "/api/station-types/**",
             "/api/station-manufacturers/**",
             "/api/station-models/**",
