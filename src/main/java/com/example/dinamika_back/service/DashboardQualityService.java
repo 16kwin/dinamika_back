@@ -11,6 +11,8 @@ import com.example.dinamika_back.dto.DashQualityIndicatorsDTO;
 import com.example.dinamika_back.dto.DashQualitySumDTO;
 import com.example.dinamika_back.dto.DashReleaseEventDTO;
 import com.example.dinamika_back.dto.DashboardQualityResponse;
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.model.DashDefectItem;
 import com.example.dinamika_back.model.DashDefectSubject;
 import com.example.dinamika_back.repository.DashDefectDailyRepository;
@@ -37,7 +39,10 @@ import java.util.Map;
 /**
  * Панель «Показатели» (топ-менеджмент): расход объема номенклатуры, уровень брака по деталям
  * и по подразделениям, показатели качества, прохождение контроля качества и лента выпуска.
+ *
+ * <p>Модуль панелей: без функции {@code dashboards} в потолке бин не создаётся (L3).
  */
+@ConditionalOnFeature(Feature.DASHBOARDS)
 @Service
 @RequiredArgsConstructor
 public class DashboardQualityService {

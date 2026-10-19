@@ -1,6 +1,8 @@
 // MigrationPhotoImporter.java
 package com.example.dinamika_back.config;
 
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.model.SprMaterialBlueprint;
 import com.example.dinamika_back.model.SprMaterialImage;
 import com.example.dinamika_back.model.SprSupplierImage;
@@ -20,6 +22,11 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 
+/**
+ * Однократный импорт фото из каталога migration_photos при старте сервера. Функция {@code photoimport}
+ * выключена во всех пресетах: без неё бин не создаётся и файловых операций при запуске нет (L3).
+ */
+@ConditionalOnFeature(Feature.PHOTOIMPORT)
 @Component
 @RequiredArgsConstructor
 @Slf4j

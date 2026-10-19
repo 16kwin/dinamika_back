@@ -1,0 +1,141 @@
+# nginx для AWMS «ДИНАМИКА» — шаблон. Положить в /etc/nginx/conf.d/awms.conf (Windows: conf\awms.conf и
+# include в http {} файла nginx.conf), заменить домен, пути к сертификату и к собранному фронтенду (dist).
+#
+# Схема: снаружи открыт только 443. Сайт (dist) отдаёт nginx, /api, /csrf, /uploads и /ws-stations — служба AWMS
+# на этом же сервере. Службе в потолке задать server.address=127.0.0.1: тогда порт 8084 снаружи не виден,
+# а «nmap -p- <сервер>» показывает один порт 443.
+#
+# ОБЯЗАТЕЛЬНО: в потолке службы строка awms.cors.allowed-origins=https://<домен сайта> (как server_name ниже).
+# TLS снимает nginx, служба видит запрос как http://<домен>:80 (X-Forwarded-* она пока не читает), а браузер
+# шлёт Origin: https://<домен> — для службы это чужой адрес. Без строки любой POST, в том числе вход, получит
+# 403 «Invalid CORS request». WebSocket (после пакета B3) берёт этот же список.
+# Адреса клиентов: X-Real-IP и X-Forwarded-For передаются, но служба их пока не читает — у неё все клиенты
+# 127.0.0.1 (решение — пакеты B5/B6, deploy/INSTALL.md, раздел 8). До него адрес клиента — в журнале nginx.
+#
+# Блоки, помеченные «только при включённой функции ...», удалить, если функция выключена в потолке.
+# Проверка конфигурации: nginx -t; применение: nginx -s reload.
+
+# Порт 80 не открывать. Если по требованиям нужен переход с http на https — раскомментировать:
+#server {
+#    listen 80;
+#    server_name awms.zavod.local;
+#    return 301 https://$host$request_uri;
+#}
+
+# Только при включённой функции websocket: заголовок Connection для Upgrade
+map $http_upgrade $awms_connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;                                   # nginx 1.25.1+; на старых версиях — «listen 443 ssl http2;»
+    server_name awms.zavod.local;
+
+    ssl_certificate     /etc/nginx/ssl/awms.crt;
+    ssl_certificate_key /etc/nginx/ssl/awms.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:awms_ssl:10m;
+    ssl_session_tickets off;
+
+    server_tokens off;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Referrer-Policy same-origin always;
+    # Включать после проверки, что сайт работает по https: браузер запомнит запрет http на год
+    #add_header Strict-Transport-Security "max-age=31536000" always;
+
+    # Предел размера запроса. Выгрузки и печать (функция export, есть в standard и full) присылают всю таблицу
+    # в теле JSON — отсюда 20m. Выключены и export, и uploads (isolated) — хватит 1m. С uploads — по регламенту
+    # заказчика, но не больше предела службы (spring.servlet.multipart.max-request-size, сейчас 1GB)
+    client_max_body_size 20m;
+
+    # Собранный фронтенд
+    root /opt/awms/dist;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Не кэшировать: index.html и config.js ссылаются на текущую сборку и адрес API, awms-build.json — состав
+    # сборки для отчёта «Профиль безопасности». expires, а не add_header: add_header в location отменил бы
+    # заголовки безопасности уровня server
+    location = /index.html      { expires -1; }
+    location = /config.js       { expires -1; }
+    location = /awms-build.json { expires -1; }
+
+    # Скрытые файлы (.git, .env, флаги импорта) не отдавать
+    location ~ /\. { return 404; }
+
+    # --- PWA ------------------------------------------------------------------------------------------------
+    # Функция pwa включена: sw.js без кэша, иначе браузер не увидит новую версию
+    location = /sw.js { expires -1; }
+    # Функция pwa выключена: вместо строки выше — ликвидатор. Он снимает service worker, удаляет кэши awms-*
+    # и перезагружает открытые вкладки. Просто удалить sw.js нельзя: при 404 браузер оставит старую регистрацию.
+    #location = /sw.js {
+    #    default_type application/javascript;
+    #    expires -1;
+    #    return 200 "self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil((async()=>{for(const k of await caches.keys())if(k.startsWith('awms-'))await caches.delete(k);await self.registration.unregister();for(const c of await self.clients.matchAll({type:'window'}))c.navigate(c.url);})()));";
+    #}
+    #location = /manifest.json { return 404; }
+    #location = /offline.html  { return 404; }
+
+    # --- Служба AWMS ----------------------------------------------------------------------------------------
+    # X-Forwarded-For — только адрес соединения ($remote_addr), а не $proxy_add_x_forwarded_for: nginx здесь
+    # первый прокси, и присланный клиентом заголовок (с любым адресом) дальше не передаётся
+    location /api/ {
+        proxy_pass http://127.0.0.1:8084;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+
+    location = /csrf {
+        proxy_pass http://127.0.0.1:8084;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Картинки и документы справочников
+    location /uploads/ {
+        proxy_pass http://127.0.0.1:8084;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Только при включённой функции video: живой поток и записи — долгие ответы без буферизации
+    location /api/video/ {
+        proxy_pass http://127.0.0.1:8084;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+
+    # Только при включённой функции websocket: живые обновления (SockJS/STOMP)
+    location /ws-stations/ {
+        proxy_pass http://127.0.0.1:8084;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $awms_connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+}

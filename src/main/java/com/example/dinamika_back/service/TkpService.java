@@ -1,13 +1,14 @@
 // AWMS — service/TkpService.java — ПОЛНЫЙ ФАЙЛ
 package com.example.dinamika_back.service;
 
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.model.*;
 import com.example.dinamika_back.repository.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
@@ -19,7 +20,12 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * ТКП от внешней системы и ответы на них (функция {@code orders}). Без функции в потолке бина нет.
+ * Исходящие запросы — через сторож RestTemplateConfig, уведомления фронтенду — через {@link LiveUpdates}.
+ */
 @Service
+@ConditionalOnFeature(Feature.ORDERS)
 @RequiredArgsConstructor
 public class TkpService {
 
@@ -30,7 +36,7 @@ public class TkpService {
     private final OrderStatusRepository orderStatusRepository;
     private final OrderTrackingRepository orderTrackingRepository;
     private final RestTemplate restTemplate;
-    private final SimpMessagingTemplate messagingTemplate;
+    private final LiveUpdates liveUpdates;
     private final ObjectMapper objectMapper;
 
     @Value("${sync.service.url}")
@@ -114,7 +120,7 @@ public class TkpService {
         notification.put("tkp_uid", tkpUid);
         notification.put("order_uid", request.get("order_uid"));
         notification.put("type", "tkp_new");
-        messagingTemplate.convertAndSend("/topic/tkp/new", notification);
+        liveUpdates.publish("/topic/tkp/new", notification);
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("tkp_uid", tkpUid);
@@ -175,8 +181,8 @@ public class TkpService {
             tkpListRepository.save(tkp);
         });
 
-        messagingTemplate.convertAndSend("/topic/tkp/status", Map.of("tkp_uid", tkpUid, "status", statusinvoice));
-        messagingTemplate.convertAndSend("/topic/orders/refresh", Map.of("type", "refresh"));
+        liveUpdates.publish("/topic/tkp/status", Map.of("tkp_uid", tkpUid, "status", statusinvoice));
+        liveUpdates.publish("/topic/orders/refresh", Map.of("type", "refresh"));
     }
 
     @Transactional

@@ -4,6 +4,8 @@ import com.example.dinamika_back.dto.DashAuditMetricDTO;
 import com.example.dinamika_back.dto.DashAuditOverpricedDTO;
 import com.example.dinamika_back.dto.DashAuditSumDTO;
 import com.example.dinamika_back.dto.DashboardAuditResponse;
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.model.DashGraphNomenclature;
 import com.example.dinamika_back.model.DashGraphPurchase;
 import com.example.dinamika_back.model.DashGraphSupplier;
@@ -26,7 +28,10 @@ import java.util.Map;
 /**
  * Панель «Аудитор»: инциденты и выдачи сверх нормы за период относительно числа операций
  * и лента заказов, где цена выше нормативной больше чем на лимит (заказы графа закупок).
+ *
+ * <p>Модуль панелей: без функции {@code dashboards} в потолке бин не создаётся (L3).
  */
+@ConditionalOnFeature(Feature.DASHBOARDS)
 @Service
 @RequiredArgsConstructor
 public class DashboardAuditService {

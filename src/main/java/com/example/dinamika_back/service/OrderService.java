@@ -1,13 +1,14 @@
 // AWMS — service/OrderService.java — ПОЛНЫЙ ФАЙЛ (трек read-only, нельзя менять)
 package com.example.dinamika_back.service;
 
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.model.*;
 import com.example.dinamika_back.repository.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
@@ -21,7 +22,13 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Заказы на поставку и обмен ими с внешней системой (функция {@code orders}). Без функции в потолке бина нет.
+ * Исходящие запросы — через сторож RestTemplateConfig, уведомления фронтенду — через {@link LiveUpdates}
+ * (при выключенном WebSocket — заглушка, заказы работают как обычно).
+ */
 @Service
+@ConditionalOnFeature(Feature.ORDERS)
 @RequiredArgsConstructor
 public class OrderService {
 
@@ -36,7 +43,7 @@ public class OrderService {
     private final RegAttributesRepository regAttributesRepository;
     private final RegAnalogRepository regAnalogRepository;
     private final RestTemplate restTemplate;
-    private final SimpMessagingTemplate messagingTemplate;
+    private final LiveUpdates liveUpdates;
     private final ObjectMapper objectMapper;
 
     @Value("${sync.service.url}")
@@ -124,7 +131,7 @@ public class OrderService {
             Map<String, Object> notification = new LinkedHashMap<>();
             notification.put("order_uid", orderUid);
             notification.put("type", "order_created");
-            messagingTemplate.convertAndSend("/topic/orders/refresh", notification);
+            liveUpdates.publish("/topic/orders/refresh", notification);
 
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("order_uid", orderUid);
@@ -211,7 +218,7 @@ public class OrderService {
             Map<String, Object> notification = new LinkedHashMap<>();
             notification.put("order_uid", orderUid);
             notification.put("type", "order_cancelled");
-            messagingTemplate.convertAndSend("/topic/orders/refresh", notification);
+            liveUpdates.publish("/topic/orders/refresh", notification);
         } catch (Exception e) {
             e.printStackTrace();
         }

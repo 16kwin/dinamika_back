@@ -50,6 +50,7 @@ public class NomenclatureService {
     private final RegEventLogRepository eventLogRepository;
     private final NomenclatureColumnSettingsService columnSettingsService;
     private final UserCodeDefaultRepository userCodeDefaultRepository;
+    private final NomenclatureModelService nomenclatureModelService;
 
     private static final String NOMENCLATURE_UPLOAD_DIR = "uploads/nomenclature/";
     private static final ObjectMapper objectMapper = new ObjectMapper();
@@ -1465,6 +1466,8 @@ public class NomenclatureService {
         regAnalogRepository.deleteByMaterialUid(materialUid);
         regRatingRepository.deleteByMaterialUid(materialUid);
         regIntegrationRepository.deleteByMaterialUid(materialUid);
+        // 3D-модели лежат в своём каталоге (nomenclature.models-dir)
+        nomenclatureModelService.deleteAllForMaterial(materialUid);
 
         try {
             Path dir = Path.of(NOMENCLATURE_UPLOAD_DIR, materialUid.toString());

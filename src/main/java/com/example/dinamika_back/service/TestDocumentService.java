@@ -1,5 +1,7 @@
 package com.example.dinamika_back.service;
 
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.model.TestDocument;
 import com.example.dinamika_back.repository.TestDocumentRepository;
 import lombok.RequiredArgsConstructor;
@@ -8,7 +10,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
+/** Тестовые документы (функция {@code testsync}, выключена во всех пресетах): без функции в потолке бина нет */
 @Service
+@ConditionalOnFeature(Feature.TESTSYNC)
 @RequiredArgsConstructor
 public class TestDocumentService {
 

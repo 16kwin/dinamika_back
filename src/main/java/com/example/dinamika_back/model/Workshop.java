@@ -1,6 +1,7 @@
 // Workshop.java — с description и address
 package com.example.dinamika_back.model;
 
+import com.example.dinamika_back.listener.WorkshopPlanFilesListener;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
@@ -14,6 +15,8 @@ import java.util.Set;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+// Файл плана цеха удаляется вместе с цехом (запись плана — каскадом в базе)
+@EntityListeners(WorkshopPlanFilesListener.class)
 public class Workshop {
 
     @Id

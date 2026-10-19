@@ -8,6 +8,8 @@ import com.example.dinamika_back.dto.DashboardOperatorResponse;
 import com.example.dinamika_back.dto.DashboardPurchaseGraphResponse;
 import com.example.dinamika_back.dto.DashboardQualityResponse;
 import com.example.dinamika_back.dto.DashboardSettingsDTO;
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.service.DashboardAuditService;
 import com.example.dinamika_back.service.DashboardControlEventService;
 import com.example.dinamika_back.service.DashboardDayEventService;
@@ -29,7 +31,11 @@ import java.util.Map;
  * Информационные панели главной страницы: «Экономический блок», «Показатели», «Оператор склада»,
  * панели ролей «Контролер», «Главный контролер», «Начальник цеха», «Служба закупа», «Аудитор»
  * и отдельные экраны «Граф закупок» и «Экран событий текущего дня» (permitAll, см. SecurityConfig).
+ *
+ * <p>Без функции {@code dashboards} в потолке контроллер и 7 сервисов панелей не создаются (L3);
+ * блоки экономики, аудитора, графа и второго экрана закрывают ворота своих подфункций.
  */
+@ConditionalOnFeature(Feature.DASHBOARDS)
 @RestController
 @RequestMapping("/api/dashboard")
 @RequiredArgsConstructor

@@ -2,6 +2,8 @@ package com.example.dinamika_back.service;
 
 import com.example.dinamika_back.dto.DashDayEventDTO;
 import com.example.dinamika_back.dto.DashboardDayEventsResponse;
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.model.DashDayEvent;
 import com.example.dinamika_back.repository.DashDayEventRepository;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +23,10 @@ import java.util.Map;
  * за сегодня в колонках «В работе» и «Завершено». Дата события не хранится: демо-день сдвигается
  * так, чтобы самое позднее событие было чуть раньше текущего момента, — экран не показывает
  * событий «из будущего» в любое время суток.
+ *
+ * <p>Модуль панелей: без функции {@code dashboards} в потолке бин не создаётся (L3).
  */
+@ConditionalOnFeature(Feature.DASHBOARDS)
 @Service
 @RequiredArgsConstructor
 public class DashboardDayEventService {

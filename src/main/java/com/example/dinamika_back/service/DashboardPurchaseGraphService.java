@@ -6,6 +6,8 @@ import com.example.dinamika_back.dto.DashGraphNomenclatureDTO;
 import com.example.dinamika_back.dto.DashGraphPurchaseDTO;
 import com.example.dinamika_back.dto.DashGraphSupplierDTO;
 import com.example.dinamika_back.dto.DashboardPurchaseGraphResponse;
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.model.DashGraphNomenclature;
 import com.example.dinamika_back.model.DashGraphPurchase;
 import com.example.dinamika_back.model.DashGraphSupplier;
@@ -31,7 +33,10 @@ import java.util.Map;
  * «Граф закупок» (панель «Служба закупа» и отдельный экран): справочники номенклатуры и поставщиков,
  * закупки за период по парам номенклатура × поставщик и связи аффилированности между поставщиками.
  * Флаги «свыше лимита» сервер не считает: лимит меняется ползунком на фронте.
+ *
+ * <p>Модуль панелей: без функции {@code dashboards} в потолке бин не создаётся (L3).
  */
+@ConditionalOnFeature(Feature.DASHBOARDS)
 @Service
 @RequiredArgsConstructor
 public class DashboardPurchaseGraphService {

@@ -11,6 +11,8 @@ import com.example.dinamika_back.dto.DashTypeAmountDTO;
 import com.example.dinamika_back.dto.DashTypeDTO;
 import com.example.dinamika_back.dto.DashboardEconomicResponse;
 import com.example.dinamika_back.dto.DashboardSettingsDTO;
+import com.example.dinamika_back.features.ConditionalOnFeature;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.model.DashNomenclatureType;
 import com.example.dinamika_back.model.UserDashboardSettings;
 import com.example.dinamika_back.repository.DashBudgetDailyRepository;
@@ -41,7 +43,10 @@ import java.util.Set;
 
 /**
  * Панель «Экономический блок»: агрегаты за период и настройки карточек пользователя.
+ *
+ * <p>Модуль панелей: без функции {@code dashboards} в потолке бин не создаётся (L3).
  */
+@ConditionalOnFeature(Feature.DASHBOARDS)
 @Service
 @RequiredArgsConstructor
 public class DashboardService {

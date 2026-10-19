@@ -1,0 +1,62 @@
+<!--
+  Служба Windows для AWMS «ДИНАМИКА» через WinSW (https://github.com/winsw/winsw, версия 2.x или 3.x) — шаблон.
+
+  Установка (PowerShell от имени администратора):
+    1. Скопировать WinSW-x64.exe в C:\AWMS\app\ под именем awms-service.exe, этот файл — рядом как awms-service.xml.
+    2. Поправить пути ниже (JAVA_HOME, каталог C:\AWMS\app, имя jar).
+    3. .\awms-service.exe install
+    4. Запуск под отдельной виртуальной учётной записью (без пароля, без прав администратора):
+         sc.exe config awms obj= "NT SERVICE\awms"
+       Права на каталоги для неё — deploy/INSTALL.md, раздел «Права на каталоги».
+    5. .\awms-service.exe start
+
+  Правила:
+    - пути к файлам потолка и секретов — только абсолютные (AWMS_FEATURES_FILE, AWMS_SECRETS_FILE): так файл
+      находится при любом рабочем каталоге;
+    - ключи белого списка потолка НЕ задавать ни в <arguments>, ни в <env>: служба не запустится, в логе будет
+      имя ключа. Их место — config/awms-features.properties. Это ровно server.address, server.port,
+      server.ssl.enabled, server.ssl.key-store, server.ssl.protocol, sync.service.url, video.ffmpeg-path и все
+      awms.*; в <env> — SERVER_PORT, SERVER_ADDRESS, SERVER_SSL_ENABLED, SERVER_SSL_KEYSTORE, SERVER_SSL_PROTOCOL,
+      SYNC_SERVICE_URL, VIDEO_FFMPEGPATH, SPRING_APPLICATION_JSON и любые AWMS_*, кроме двух путей ниже
+      (подробно — deploy/INSTALL.md, раздел 1, шаг 3);
+    - прочие настройки сервера (server.tomcat.*, server.forward-headers-strategy, logging.*) задаются здесь,
+      в <arguments>, — в файле потолка они отменяют запуск;
+    - пароли и ключи — в config/awms-secrets.properties (после пакета B10). До B10 учётную запись БД
+      и пароль хранилища ключей HTTPS (если служба сама держит HTTPS) можно передать переменными
+      SPRING_DATASOURCE_USERNAME/PASSWORD, SPRING_FLYWAY_USER/PASSWORD, SERVER_SSL_KEYSTOREPASSWORD —
+      тогда этот файл читают только администраторы;
+    - не добавлять -agentlib:jdwp (отладчик) и -Dcom.sun.management.jmxremote (удалённый JMX).
+-->
+<service>
+  <id>awms</id>
+  <name>AWMS DINAMIKA</name>
+  <description>AWMS «ДИНАМИКА»: сервер приложения (Spring Boot)</description>
+
+  <executable>%JAVA_HOME%\bin\java.exe</executable>
+  <arguments>-Xms512m -Xmx2g -Dfile.encoding=UTF-8 -jar "C:\AWMS\app\dinamika_back.jar"</arguments>
+
+  <!-- Рабочий каталог: от него считаются uploads/, data/, video-archive/, logs/ и config/ по умолчанию -->
+  <workingdirectory>C:\AWMS\app</workingdirectory>
+
+  <!-- Абсолютные пути к профилю функций и секретам -->
+  <env name="AWMS_FEATURES_FILE" value="C:\AWMS\app\config\awms-features.properties"/>
+  <env name="AWMS_SECRETS_FILE" value="C:\AWMS\app\config\awms-secrets.properties"/>
+
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <!-- Если PostgreSQL на этом же сервере — раскомментировать, чтобы служба ждала его запуска
+       (имя службы PostgreSQL проверить: Get-Service postgres*) -->
+  <!-- <depend>postgresql-x64-18</depend> -->
+
+  <onfailure action="restart" delay="20 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>30 sec</stoptimeout>
+
+  <!-- Вывод консоли службы; журнал AWMS.SECURITY пишется приложением в logs\awms-security.log -->
+  <logpath>C:\AWMS\app\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>10</keepFiles>
+  </log>
+</service>
