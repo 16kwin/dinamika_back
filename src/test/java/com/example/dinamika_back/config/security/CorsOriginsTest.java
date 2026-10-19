@@ -16,6 +16,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -24,13 +25,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 /**
- * Адреса CORS из потолка ({@code awms.cors.allowed-origins}) — только точные источники. Ответы идут с учётными
- * данными, поэтому «*», шаблоны и {@code null} отменяют запуск: иначе страница с любого адреса читала бы API
- * и CSRF-токен через браузер вошедшего пользователя.
+ * Дополнительные адреса CORS из потолка ({@code awms.cors.allowed-origins}) добавляются к прежнему списку сервера
+ * и стенда в SecurityConfig — и только точные источники. Ответы идут с учётными данными, поэтому «*», шаблоны
+ * и {@code null} отменяют запуск: иначе страница с любого адреса читала бы API и CSRF-токен через браузер
+ * вошедшего пользователя.
  */
 class CorsOriginsTest {
 
     private static final String KEY = "awms.cors.allowed-origins";
+    /** Прежний список адресов в SecurityConfig: действует и без файла потолка */
+    private static final List<String> LEGACY = List.of("http://localhost:3000", "http://127.0.0.1:3000",
+            "http://109.69.22.155:3000", "http://109.69.22.155:8084", "http://localhost", "http://dynamikaawms.ru",
+            "https://dynamikaawms.ru");
 
     @Test
     void exactOriginsAreAccepted() {
@@ -48,9 +54,9 @@ class CorsOriginsTest {
             assertThat(SecurityConfig.corsOrigins(ceiling.listParam(CeilingParam.CORS_ALLOWED_ORIGINS))).as(preset)
                     .isNotEmpty();
         }
+        // Без ключа дополнительных адресов нет: действует прежний список SecurityConfig
         FeatureSnapshot byDefault = FeatureResolver.fromProperties(Map.of("awms.features.preset", "standard"));
-        assertThat(SecurityConfig.corsOrigins(byDefault.listParam(CeilingParam.CORS_ALLOWED_ORIGINS)))
-                .containsExactlyInAnyOrder("http://localhost:3000", "http://127.0.0.1:3000", "http://localhost");
+        assertThat(SecurityConfig.corsOrigins(byDefault.listParam(CeilingParam.CORS_ALLOWED_ORIGINS))).isEmpty();
     }
 
     @Test
@@ -78,15 +84,26 @@ class CorsOriginsTest {
             assertThat(cause).isInstanceOf(FeatureConfigurationException.class).hasMessageContaining(KEY)
                     .hasMessageContaining("«*»");
         });
-        // Тот же контекст с точным адресом поднимается: отказ выше — из-за «*», а не из-за настройки теста
-        runner().withPropertyValues(KEY + "=https://awms.zavod.local").run(context -> {
+        // Тот же контекст с точным адресом поднимается: отказ выше — из-за «*», а не из-за настройки теста.
+        // Адрес добавляется к прежнему списку, повтор адреса из списка не дублируется
+        runner().withPropertyValues(KEY + "=https://awms.zavod.local,http://localhost:3000").run(context -> {
             assertThat(context).hasNotFailed();
             CorsConfiguration cors = context.getBean("corsConfigurationSource", CorsConfigurationSource.class)
                     .getCorsConfiguration(new MockHttpServletRequest("GET", "/api/features"));
             assertThat(cors).isNotNull();
-            assertThat(cors.getAllowedOrigins()).containsExactly("https://awms.zavod.local");
+            List<String> expected = new ArrayList<>(LEGACY);
+            expected.add("https://awms.zavod.local");
+            assertThat(cors.getAllowedOrigins()).containsExactlyElementsOf(expected);
             assertThat(cors.getAllowedOriginPatterns()).isNull();
             assertThat(cors.getAllowCredentials()).isTrue();
+        });
+        // Пустой ключ — только прежний список
+        runner().withPropertyValues(KEY + "=").run(context -> {
+            assertThat(context).hasNotFailed();
+            CorsConfiguration cors = context.getBean("corsConfigurationSource", CorsConfigurationSource.class)
+                    .getCorsConfiguration(new MockHttpServletRequest("GET", "/api/features"));
+            assertThat(cors).isNotNull();
+            assertThat(cors.getAllowedOrigins()).containsExactlyElementsOf(LEGACY);
         });
     }
 

@@ -54,7 +54,7 @@ class VideoSourceTest {
                 .isEqualTo("rtsp://admin:***@192.168.1.64:554/ISAPI/Streaming/Channels/101");
     }
 
-    /** Входы с умолчаниями потолка: камеры в частных сетях, file:/test: запрещены; IP-адреса без DNS */
+    /** Входы с умолчаниями потолка: сети камер не ограничены, file:/test: запрещены; IP-адреса без DNS */
     private static List<String> input(String url, boolean realtime) {
         return VideoSource.inputArgs(url, 8, realtime, VideoTestSupport.DEFAULT_SOURCES, InetAddress::getAllByName);
     }
@@ -124,8 +124,25 @@ class VideoSourceTest {
     }
 
     @Test
-    void defaultNetworksArePrivateRfc1918() throws Exception {
+    void withoutCeilingNetworksCamerasMayBeInAnyNetwork() throws Exception {
+        // awms.video.allowed-networks пуст (умолчание) — сети не ограничены, как до выключателей
         VideoSource.SourcePolicy policy = VideoTestSupport.DEFAULT_SOURCES;
+        assertThat(policy.networks()).isEmpty();
+        for (String ip : List.of("10.0.0.1", "192.168.1.64", "8.8.8.8", "127.0.0.1", "192.0.2.10", "::1", "fd00::1")) {
+            assertThat(policy.allows(InetAddress.getByName(ip))).as(ip).isTrue();
+        }
+        // Имя камеры по-прежнему разрешается один раз, FFmpeg получает проверенный адрес
+        VideoSource.HostResolver resolver = dns(Map.of("cam.example", List.of("8.8.8.8")));
+        assertThat(VideoSource.checkedSource("rtsp://admin:p@cam.example:554/s", policy, resolver))
+                .isEqualTo("rtsp://admin:p@8.8.8.8:554/s");
+        // Политика источников file:/test: от списка сетей не зависит
+        assertThatThrownBy(() -> input("test:", true)).isInstanceOf(VideoException.class)
+                .hasMessageContaining("awms.video.allow-file-source");
+    }
+
+    @Test
+    void explicitNetworksRestrictCamerasToPrivateRfc1918() throws Exception {
+        VideoSource.SourcePolicy policy = VideoTestSupport.PRIVATE_NETWORKS;
         for (String ip : List.of("10.0.0.1", "10.255.255.255", "172.16.0.1", "172.31.255.254", "192.168.1.64")) {
             assertThat(policy.allows(InetAddress.getByName(ip))).as(ip).isTrue();
         }
@@ -139,7 +156,8 @@ class VideoSourceTest {
     void cameraOutsideAllowedNetworksIsRefusedBeforeFfmpeg() {
         for (String url : List.of("rtsp://admin:p@8.8.8.8/s", "rtsp://127.0.0.1:554/s", "rtsp://[::1]/s",
                 "rtsp://admin:p@192.0.2.10:554/ISAPI/Streaming/Channels/101")) {
-            assertThatThrownBy(() -> input(url, true))
+            assertThatThrownBy(() -> VideoSource.inputArgs(url, 8, true, VideoTestSupport.PRIVATE_NETWORKS,
+                    InetAddress::getAllByName))
                     .as(url)
                     .isInstanceOf(VideoException.class)
                     .hasMessageContaining("вне разрешённых сетей камер")
@@ -156,19 +174,19 @@ class VideoSourceTest {
                 "evil.example", List.of("8.8.8.8"),
                 "mixed.example", List.of("8.8.4.4", "10.1.2.3")));
         assertThat(VideoSource.inputArgs("rtsp://admin:fName55@@cam01.local:554/ISAPI/Streaming/Channels/101?transport=udp",
-                8, true, VideoTestSupport.DEFAULT_SOURCES, resolver))
+                8, true, VideoTestSupport.PRIVATE_NETWORKS, resolver))
                 .containsExactly("-protocol_whitelist", "rtsp,rtp,tcp,udp", "-rtsp_transport", "udp", "-timeout", "8000000",
                         "-i", "rtsp://admin:fName55%40@192.168.1.64:554/ISAPI/Streaming/Channels/101");
         // Из нескольких адресов берётся разрешённый
-        assertThat(VideoSource.checkedSource("rtsp://mixed.example/s", VideoTestSupport.DEFAULT_SOURCES, resolver))
+        assertThat(VideoSource.checkedSource("rtsp://mixed.example/s", VideoTestSupport.PRIVATE_NETWORKS, resolver))
                 .isEqualTo("rtsp://10.1.2.3/s");
         assertThatThrownBy(() -> VideoSource.checkedSource("rtsp://admin:p@evil.example/s",
-                VideoTestSupport.DEFAULT_SOURCES, resolver))
+                VideoTestSupport.PRIVATE_NETWORKS, resolver))
                 .isInstanceOf(VideoException.class)
                 .hasMessageContaining("evil.example (8.8.8.8)")
                 .satisfies(e -> assertThat(videoError(e).status()).isEqualTo(HttpStatus.FORBIDDEN));
         // Имя не разрешилось — камера недоступна (503), FFmpeg не запускается
-        assertThatThrownBy(() -> VideoSource.checkedSource("rtsp://unknown.local/s", VideoTestSupport.DEFAULT_SOURCES,
+        assertThatThrownBy(() -> VideoSource.checkedSource("rtsp://unknown.local/s", VideoTestSupport.PRIVATE_NETWORKS,
                 resolver))
                 .isInstanceOf(VideoException.class)
                 .satisfies(e -> assertThat(videoError(e).status()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
@@ -178,17 +196,17 @@ class VideoSourceTest {
     void checkedHostIsTheHostFfmpegConnectsTo() {
         // Логин и пароль с «@», «/», «?» кодируются — адрес камеры для проверки и для FFmpeg один и тот же
         VideoSource.HostResolver resolver = dns(Map.of("evil.example", List.of("8.8.8.8")));
-        assertThat(VideoSource.checkedSource("rtsp://evil.example/x@10.0.0.5/s", VideoTestSupport.DEFAULT_SOURCES, resolver))
+        assertThat(VideoSource.checkedSource("rtsp://evil.example/x@10.0.0.5/s", VideoTestSupport.PRIVATE_NETWORKS, resolver))
                 .isEqualTo("rtsp://evil.example%2Fx@10.0.0.5/s");
-        assertThat(VideoSource.checkedSource("rtsp://admin:a?b#c@10.0.0.5", VideoTestSupport.DEFAULT_SOURCES, resolver))
+        assertThat(VideoSource.checkedSource("rtsp://admin:a?b#c@10.0.0.5", VideoTestSupport.PRIVATE_NETWORKS, resolver))
                 .isEqualTo("rtsp://admin:a%3Fb%23c@10.0.0.5");
         assertThatThrownBy(() -> VideoSource.checkedSource("rtsp://10.0.0.5@evil.example/s",
-                VideoTestSupport.DEFAULT_SOURCES, resolver))
+                VideoTestSupport.PRIVATE_NETWORKS, resolver))
                 .isInstanceOf(VideoException.class)
                 .hasMessageContaining("вне разрешённых сетей камер");
         // Порт не числом и пустой адрес — неверная ссылка
         for (String url : List.of("rtsp://10.0.0.5:55x4/s", "rtsp://admin:p@/s", "rtsp://[fd00::1/s")) {
-            assertThatThrownBy(() -> VideoSource.checkedSource(url, VideoTestSupport.DEFAULT_SOURCES, resolver))
+            assertThatThrownBy(() -> VideoSource.checkedSource(url, VideoTestSupport.PRIVATE_NETWORKS, resolver))
                     .as(url)
                     .isInstanceOf(VideoException.class)
                     .satisfies(e -> assertThat(videoError(e).status()).isEqualTo(HttpStatus.BAD_REQUEST));

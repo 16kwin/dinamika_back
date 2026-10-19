@@ -1,48 +1,37 @@
 // SecurityConfig.java — ПОЛНЫЙ ФАЙЛ (добавлены /api/employees/**)
+// Правила — как в main, с добавлениями поверх: 3D, план цеха, ГПП, справочники только на чтение без входа,
+// флаги функций до входа (/api/features/public). Адреса CORS — прежние; файл потолка может только добавить свои
 package com.example.dinamika_back.config.security;
 
-import com.example.dinamika_back.features.CeilingParam;
-import com.example.dinamika_back.features.Feature;
-import com.example.dinamika_back.features.FeatureConfigurationException;
-import com.example.dinamika_back.features.FeatureGateFilter;
-import com.example.dinamika_back.features.FeatureResolver;
-import com.example.dinamika_back.features.FeatureSnapshot;
 import com.nimbusds.jose.crypto.DirectDecrypter;
 import com.nimbusds.jose.crypto.DirectEncrypter;
 import com.nimbusds.jose.jwk.OctetSequenceKey;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
-import org.springframework.security.authorization.AuthorizationDecision;
-import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.ExceptionTranslationFilter;
-import org.springframework.security.web.access.intercept.AuthorizationFilter;
-import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
-import org.springframework.security.web.util.matcher.OrRequestMatcher;
-import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import com.example.dinamika_back.features.CeilingParam;
+import com.example.dinamika_back.features.FeatureConfigurationException;
+import com.example.dinamika_back.features.FeatureGateFilter;
+import com.example.dinamika_back.features.FeatureResolver;
 import com.example.dinamika_back.service.AuthService;
 import com.example.dinamika_back.service.RefreshTokenService;
 
@@ -51,34 +40,29 @@ import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.function.Supplier;
 
-/**
- * Правила доступа (раздел 6.6 проекта, пакет B5). Потолок функций читается статически через
- * {@link FeatureResolver#resolve(Environment)}: срезам {@code @WebMvcTest} новые бины не нужны. Правила строятся
- * один раз при старте, переключатели администратора (этап 2) их не меняют — выключенную ими функцию закрывают
- * ворота (404 до Security).
- *
- * <p>Порядок правил (действует первое совпавшее):
- * <ol>
- *   <li>всегда без входа: вход, ошибки, выход, CSRF-токен, флаги функций до входа;</li>
- *   <li>внешние системы без входа: колбэки заказов из реестра (ключ проверяет OrdersCallbackKeyFilter), приём
- *       тестовой синхронизации;</li>
- *   <li>роли функций из потолка ({@code awms.features.<key>.roles}): совпавшие правила всех функций проверяются
- *       вместе, роли родителя и requires — тоже; GET — это и HEAD;</li>
- *   <li>только после входа: 3D-модели, план цеха, ГПП;</li>
- *   <li>режим табло ({@code anonymous}): прежняя анонимная поверхность;</li>
- *   <li>справочники и всё остальное — после входа, изменения — с CSRF-токеном.</li>
- * </ol>
- * Роль SECURITY вне профиля безопасности только читает ({@link SecurityRoleReadOnlyFilter}).
- */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
-    private static final Logger SECURITY_LOG = LoggerFactory.getLogger("AWMS.SECURITY");
+    /** Справочники, открытые на чтение без входа: изменять их можно только после входа и с CSRF-токеном */
+    private static final String[] REFERENCE_BOOKS = {
+            "/api/nomenclature/**",
+            "/api/templates/**",
+            "/api/enterprises/**",
+            "/api/workshops/**",
+            "/api/sections/**",
+            "/api/employees/**",
+            "/api/station-types/**",
+            "/api/station-manufacturers/**",
+            "/api/station-models/**",
+            "/api/station-configurations/**",
+            "/api/stations/crud/**"
+    };
 
     private AuthService authService;
+
+    @Autowired
     private Environment environment;
 
     private @Value("${jwt.access-token-name}") String accessTokenCookieName;
@@ -90,11 +74,6 @@ public class SecurityConfig {
     @Autowired
     public void setUserService(AuthService authService) {
         this.authService = authService;
-    }
-
-    @Autowired
-    public void setEnvironment(Environment environment) {
-        this.environment = environment;
     }
 
     @Bean
@@ -149,103 +128,112 @@ public class SecurityConfig {
             GetCsrfTokenFilter getCsrfTokenFilter,
             CsrfTokenRepository csrfTokenRepository) throws Exception {
 
-        FeatureSnapshot ceiling = FeatureResolver.resolve(environment);
-        SECURITY_LOG.info("Правила доступа: режим табло (anonymous) {}, без входа — {} правил(а), роли функций — {} "
-                        + "правил(а), CORS: {}", ceiling.isOn(Feature.ANONYMOUS) ? "включён" : "выключен",
-                PublicEndpoints.withoutSignIn(ceiling).size(), PublicEndpoints.roleRules(ceiling).size(),
-                ceiling.param(CeilingParam.CORS_ALLOWED_ORIGINS).isEmpty() ? "только тот же источник"
-                        : ceiling.param(CeilingParam.CORS_ALLOWED_ORIGINS));
-
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .addFilterAfter(getCsrfTokenFilter, ExceptionTranslationFilter.class)
-            .authorizeHttpRequests(auth -> authorize(auth, ceiling))
+            .authorizeHttpRequests(authorizeHttpRequests ->
+                    authorizeHttpRequests
+                            .requestMatchers("/error", "/api/auth/*", "/logout", "/api/auth/check_password", "/csrf").permitAll()
+                            // Флаги функций до входа (pwa, passwords): страница входа решает, предлагать ли установку и сохранение пароля
+                            .requestMatchers(HttpMethod.GET, "/api/features/public").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/locations/hierarchy").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/locations/hierarchy/first").permitAll()
+                            .requestMatchers(HttpMethod.POST, "/api/stations/static/filtered").permitAll()
+                            .requestMatchers(HttpMethod.POST, "/api/stations/dynamic/filtered").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/locations/*/photo").permitAll()
+                            .requestMatchers(HttpMethod.POST, "/api/locations/*/photo").authenticated()
+                            .requestMatchers(HttpMethod.DELETE, "/api/locations/*/photo").authenticated()
+                            .requestMatchers("/uploads/**").permitAll()
+                            .requestMatchers(HttpMethod.POST, "/api/locations").authenticated()
+                            .requestMatchers(HttpMethod.GET, "/api/stations/static").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/stations/static/**").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/stations/dynamic").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/stations/dynamic/**").permitAll()
+                            .requestMatchers(HttpMethod.POST, "/api/stations").permitAll()
+                            .requestMatchers("/ws-stations/**").permitAll()
+                            .requestMatchers(HttpMethod.GET, "/api/user/filters").authenticated()
+                            .requestMatchers(HttpMethod.POST, "/api/user/filters").authenticated()
+                            .requestMatchers(HttpMethod.DELETE, "/api/user/filters").authenticated()
+                            .requestMatchers(HttpMethod.POST,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
+                            .requestMatchers(HttpMethod.PATCH,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
+                            .requestMatchers(HttpMethod.DELETE,"/api/animal_card/**").hasAnyRole("ADMIN", "OPERATOR")
+                            .requestMatchers(HttpMethod.POST,"/api/docs/**").hasAnyRole("ADMIN", "OPERATOR")
+                            .requestMatchers(HttpMethod.PATCH,"/api/docs/**").hasAnyRole("ADMIN", "OPERATOR")
+                            .requestMatchers(HttpMethod.DELETE,"/api/docs/**").hasAnyRole("ADMIN", "OPERATOR")
+                            .requestMatchers(HttpMethod.POST,"/api/information/**").hasRole("ADMIN")
+                            .requestMatchers(HttpMethod.PATCH,"/api/information/**").hasRole("ADMIN")
+                            .requestMatchers(HttpMethod.DELETE,"/api/information/**").hasRole("ADMIN")
+                            .requestMatchers("/api/notification/**").hasAnyRole("ADMIN", "OPERATOR")
+                            .requestMatchers("/api/users/**").hasRole("ADMIN")
+                            .requestMatchers(HttpMethod.POST, "/api/test-documents/**").authenticated()
+                            .requestMatchers(HttpMethod.PUT, "/api/test-documents/**").authenticated()
+                            .requestMatchers(HttpMethod.GET, "/api/test-documents/**").authenticated()
+                            .requestMatchers(HttpMethod.DELETE, "/api/test-documents/**").authenticated()
+                            .requestMatchers(HttpMethod.POST, "/api/sync/**").permitAll()
+                            // 3D-модели номенклатуры — файлы конструкторской документации: только после входа.
+                            // Стоит выше общего правила номенклатуры, иначе его перехватит permitAll.
+                            // /api/nomenclature/models (без /3d) — справочник моделей брендов, он остаётся открытым
+                            .requestMatchers("/api/nomenclature/*/models", "/api/nomenclature/models/3d/**").authenticated()
+                            // План цеха и расположение станций: смотреть — после входа, править — руководителю (проверка в контроллере)
+                            .requestMatchers("/api/station-plans/**").authenticated()
+                            // График подготовки производства: смотреть — после входа, сохранять — руководителю (проверка в контроллере)
+                            .requestMatchers("/api/gpp/**").authenticated()
+                            // Справочники: читать (GET) можно без входа, изменять — только после входа и с CSRF-токеном.
+                            // Раньше их POST/PATCH/DELETE были открыты всем: например, DELETE /api/nomenclature/items
+                            // без входа удалял номенклатуру вместе с файлами 3D-моделей
+                            .requestMatchers(HttpMethod.GET, REFERENCE_BOOKS).permitAll()
+                            .requestMatchers(REFERENCE_BOOKS).authenticated()
+                            // Заказы и ТКП принимают изменения от SAAS (через Задел) без входа — правила прежние
+                            .requestMatchers("/api/orders/**").permitAll()
+                            .requestMatchers("/api/tkp/**").permitAll()
+                            .requestMatchers("/api/dashboard/**").permitAll()
+                            .anyRequest().authenticated())
             .sessionManagement(sessionManagement -> sessionManagement
                     .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                     .sessionAuthenticationStrategy(tokenCookieSessionAuthenticationStrategy))
             .csrf(csrf -> csrf
                     .csrfTokenRepository(csrfTokenRepository)
                     .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                    // Справочники здесь не перечислены: их изменения идут только с CSRF-токеном,
-                    // фронтенд добавляет X-XSRF-TOKEN ко всем не-GET запросам (AxiosService)
-                    .ignoringRequestMatchers(matchers(PublicEndpoints.csrfIgnored(ceiling)))
+                    .ignoringRequestMatchers(
+                            "/api/auth/login",
+                            "/api/auth/refresh_token",
+                            "/csrf",
+                            "/ws-stations/**",
+                            "/api/sync/**",
+                            // Справочники (REFERENCE_BOOKS) здесь не перечислены: их изменения идут только с CSRF-токеном,
+                            // фронтенд добавляет X-XSRF-TOKEN ко всем не-GET запросам (AxiosService)
+                            "/api/orders/**",
+                            "/api/tkp/**",
+                            "/api/dashboard/**"
+                    )
                     .sessionAuthenticationStrategy((authentication, request, response) -> {
-                    }))
-            // Роль SECURITY только читает: после правил доступа и CSRF, отказ — 403 через ExceptionTranslationFilter
-            .addFilterAfter(new SecurityRoleReadOnlyFilter(), AuthorizationFilter.class);
+                    }));
 
         http.with(tokenCookieAuthenticationConfigurer, Customizer.withDefaults());
 
         return http.build();
     }
 
-    /** Правила доступа по потолку; порядок — в описании класса */
-    private static void authorize(
-            AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry auth,
-            FeatureSnapshot ceiling) {
-        auth.requestMatchers(matchers(PublicEndpoints.always())).permitAll();
-
-        List<PublicEndpoints.Endpoint> machine = PublicEndpoints.machine(ceiling);
-        if (!machine.isEmpty()) auth.requestMatchers(matchers(machine)).permitAll();
-
-        // Роли функций из потолка — выше режима табло: функция с ролями без входа недоступна
-        List<PublicEndpoints.RoleRule> roleRules = PublicEndpoints.roleRules(ceiling);
-        if (!roleRules.isEmpty()) {
-            auth.requestMatchers(new OrRequestMatcher(roleRules.stream().map(PublicEndpoints.RoleRule::matcher).toList()))
-                    .access(featureRoles(roleRules, ceiling));
-        }
-
-        // 3D-модели, план цеха, ГПП — только после входа, даже в режиме табло (выше GET справочников)
-        auth.requestMatchers(matchers(PublicEndpoints.signedIn())).authenticated();
-
-        List<PublicEndpoints.Endpoint> anonymous = PublicEndpoints.anonymous(ceiling);
-        if (!anonymous.isEmpty()) auth.requestMatchers(matchers(anonymous)).permitAll();
-
-        // Справочники изменяются только после входа и с CSRF-токеном. Раньше их POST/PATCH/DELETE были открыты всем:
-        // например, DELETE /api/nomenclature/items без входа удалял номенклатуру вместе с файлами 3D-моделей
-        auth.requestMatchers(PublicEndpoints.REFERENCE_BOOKS.stream()
-                        .map(AntPathRequestMatcher::antMatcher).toArray(RequestMatcher[]::new))
-                .authenticated();
-        auth.anyRequest().authenticated();
-    }
-
-    /**
-     * Проверка ролей функций: запрос пропускается, только если роли пользователя подходят ко всем совпавшим
-     * правилам — функции, её родителей и requires ({@link PublicEndpoints#rolesAllow}). Аноним не проходит
-     */
-    private static AuthorizationManager<RequestAuthorizationContext> featureRoles(
-            List<PublicEndpoints.RoleRule> rules, FeatureSnapshot ceiling) {
-        return (Supplier<Authentication> authentication, RequestAuthorizationContext context) -> {
-            Authentication user = authentication.get();
-            for (PublicEndpoints.RoleRule rule : rules) {
-                if (rule.matcher().matches(context.getRequest())
-                        && !PublicEndpoints.rolesAllow(ceiling, rule.feature(), user)) {
-                    return new AuthorizationDecision(false);
-                }
-            }
-            // Совпавшие правила пропустили: у каждой функции с ролями роль подошла, значит, пользователь вошёл
-            return new AuthorizationDecision(user != null && user.isAuthenticated()
-                    && !(user instanceof AnonymousAuthenticationToken));
-        };
-    }
-
-    private static RequestMatcher[] matchers(List<PublicEndpoints.Endpoint> endpoints) {
-        return endpoints.stream().map(PublicEndpoints.Endpoint::matcher).toArray(RequestMatcher[]::new);
-    }
-
-    /**
-     * CORS: адреса фронтенда — из потолка ({@code awms.cors.allowed-origins}, раздел 4.5), а не из кода. Пустой список —
-     * только тот же источник. Только точные адреса ({@link #corsOrigins}): ответы идут с учётными данными. Заголовок
-     * ревизии профиля {@code X-AWMS-Features} открыт для чтения: иначе при кросс-доменном API (public/config.js) фронт
-     * его не видит и не узнаёт о смене профиля. Этот же бин берут ворота функций для своих ответов 404
-     */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(corsOrigins(
-                FeatureResolver.resolve(environment).listParam(CeilingParam.CORS_ALLOWED_ORIGINS)));
+        List<String> origins = new ArrayList<>(Arrays.asList(
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://109.69.22.155:3000",
+    "http://109.69.22.155:8084",
+    "http://localhost",
+    "http://dynamikaawms.ru",
+    "https://dynamikaawms.ru"
+));
+        // Поверх прежнего списка — адреса из файла потолка (awms.cors.allowed-origins), если они там заданы
+        for (String extra : corsOrigins(FeatureResolver.resolve(environment).listParam(CeilingParam.CORS_ALLOWED_ORIGINS))) {
+            if (!origins.contains(extra)) origins.add(extra);
+        }
+        configuration.setAllowedOrigins(origins);
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-XSRF-TOKEN", "XSRF-TOKEN", "JSESSIONID", accessTokenCookieName, refreshTokenCookieName));
+        // Ревизия профиля функций: фронтенд читает этот заголовок и при кросс-доменном API
         configuration.setExposedHeaders(List.of(FeatureGateFilter.REVISION_HEADER));
         configuration.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

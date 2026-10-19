@@ -73,6 +73,8 @@ import java.util.regex.Pattern;
  */
 public final class FeatureResolver {
 
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(FeatureResolver.class);
+
     /** Переменная (или системное свойство) с путём к файлу потолка */
     public static final String FEATURES_FILE_VARIABLE = "AWMS_FEATURES_FILE";
     /** Пресет без файла потолка (режим разработчика): для согласования непригоден */
@@ -180,13 +182,16 @@ public final class FeatureResolver {
         FeaturePreset preset;
         String presetSource;
         if (presetValue == null) {
-            preset = FeaturePreset.ISOLATED;
+            // Без файла потолка сервер работает как до выключателей — с полным набором функций. Сузить набор
+            // (standard, isolated — заказчику в закрытом контуре) можно только явно, файлом потолка
+            preset = FeaturePreset.FULL;
             presetSource = "default";
             warnings.add(exists
-                    ? "В файле потолка " + ceiling + " нет ключа awms.features.preset: применён пресет isolated "
-                    + "(«Изолированный минимум»)"
-                    : "Файл потолка не найден: " + ceiling + ". Применён пресет isolated («Изолированный минимум»): "
-                    + "работает только ядро учёта. Положите файл потолка или задайте путь в " + FEATURES_FILE_VARIABLE);
+                    ? "В файле потолка " + ceiling + " нет ключа awms.features.preset: применён пресет full "
+                    + "(«Расширенный», как до выключателей)"
+                    : "Файл потолка не найден: " + ceiling + ". Применён пресет full («Расширенный»): все функции, "
+                    + "как до выключателей. Чтобы сузить набор, положите файл потолка или задайте путь в "
+                    + FEATURES_FILE_VARIABLE);
         } else {
             preset = FeaturePreset.fromKey(presetValue.value());
             if (preset == null) {
@@ -243,8 +248,9 @@ public final class FeatureResolver {
                 raw = found.value();
                 origin = found.originText();
             } else if (p == CeilingParam.WEBSOCKET_ALLOWED_ORIGINS) {
-                raw = params.get(CeilingParam.CORS_ALLOWED_ORIGINS);
-                origin = "как awms.cors.allowed-origins";
+                // Как до выключателей: подключение с любого источника; ограничить — явным списком в файле потолка
+                raw = "*";
+                origin = "умолчание (как раньше: любой источник)";
             } else {
                 raw = p.defaultValue();
                 origin = "умолчание";
@@ -421,10 +427,21 @@ public final class FeatureResolver {
         private void checkSource(PropertySource<?> ps, Origin origin, String key) {
             Kind kind = kind(ps, origin);
             if (kind == Kind.CEILING || kind == Kind.JAR || kind == Kind.TEST) return;
+            // Не отказ, а предупреждение: служба сервера может задавать порт, адрес и т. п. аргументами или окружением —
+            // так было до выключателей, и запуск из-за этого не должен ломаться. Значение применяется как раньше,
+            // но в отпечаток профиля оно не попадает — отчёт для ИБ увидит это по предупреждению в логе
+            LOG.warn("Параметр «{}» задан вне файла потолка: {}. Он применяется, но профиль функций его не учитывает; "
+                    + "для согласования с ИБ перенесите значение в файл потолка {}", key, describe(ps, origin, key), ceiling);
+        }
+
+        /** Выключатель awms.features.* — только из файла потолка, умолчаний jar или теста, иначе отказ запуска */
+        private void checkFeatureSource(PropertySource<?> ps, Origin origin, String key) {
+            Kind kind = kind(ps, origin);
+            if (kind == Kind.CEILING || kind == Kind.JAR || kind == Kind.TEST) return;
             throw new FeatureConfigurationException("Ключ «" + key + "» задан вне файла потолка: "
-                    + describe(ps, origin, key) + ". Профиль функций и параметры безопасности принимаются только из "
-                    + "файла потолка " + ceiling + " (и умолчаний jar); переопределять их окружением, аргументами "
-                    + "или системными свойствами нельзя. Перенесите значение в файл потолка и перезапустите службу");
+                    + describe(ps, origin, key) + ". Профиль функций принимается только из файла потолка " + ceiling
+                    + " (и умолчаний jar); переопределять его окружением, аргументами или системными свойствами "
+                    + "нельзя. Перенесите значение в файл потолка и перезапустите службу");
         }
 
         private void checkFeatureName(PropertySource<?> ps, ConfigurationPropertyName name, Origin origin) {
@@ -489,9 +506,14 @@ public final class FeatureResolver {
                 }
                 Kind kind = kind(ps, origin);
                 // Действующее значение — только из допустимого источника. verify() перебирает лишь перечислимые
-                // источники; ключ из неперечислимого (JNDI и т. п.) ловится здесь
+                // источники; ключ из неперечислимого (JNDI и т. п.) ловится здесь. Выключатели awms.features.*
+                // вне потолка — по-прежнему отказ; параметры безопасности — предупреждение (checkSource)
                 if (!(kind == Kind.ENV && name.equals(PRESET) && !ceilingExists)) {
-                    checkSource(ps, origin, name.toString());
+                    if (ROOT.isAncestorOf(name) && CeilingParam.byName(name) == null) {
+                        checkFeatureSource(ps, origin, name.toString());
+                    } else {
+                        checkSource(ps, origin, name.toString());
+                    }
                 }
                 return new Found(value, kind, originText(kind, ps, origin, name.toString()));
             }

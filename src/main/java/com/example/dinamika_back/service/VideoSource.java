@@ -101,7 +101,8 @@ public final class VideoSource {
 
         /** Адрес в одной из разрешённых сетей */
         public boolean allows(InetAddress address) {
-            return networks.stream().anyMatch(network -> network.contains(address));
+            // Сети не заданы — камеры в любой сети, как до выключателей; ограничение включается файлом потолка
+            return networks.isEmpty() || networks.stream().anyMatch(network -> network.contains(address));
         }
     }
 

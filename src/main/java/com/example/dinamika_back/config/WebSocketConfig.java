@@ -68,8 +68,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
             log.info("WebSocket /ws-stations: список awms.websocket.allowed-origins пуст — только тот же источник");
         } else {
             if (origins.contains("*")) {
-                log.warn("WebSocket /ws-stations: в awms.websocket.allowed-origins указано «*» — подключение с любого "
-                        + "сайта через браузер пользователя");
+                // Так было до выключателей; ограничить — явным списком awms.websocket.allowed-origins в файле потолка
+                log.info("WebSocket /ws-stations: подключение с любого источника (awms.websocket.allowed-origins не "
+                        + "ограничен)");
             }
             endpoint.setAllowedOriginPatterns(origins.toArray(String[]::new));
         }

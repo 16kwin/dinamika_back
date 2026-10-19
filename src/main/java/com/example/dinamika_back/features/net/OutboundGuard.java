@@ -137,6 +137,8 @@ public final class OutboundGuard implements ClientHttpRequestInterceptor {
         if (!scheme.equals("http") && !scheme.equals("https")) {
             return "схема «" + scheme + "» не допускается (только http и https)";
         }
+        // Список не задан — исходящие не ограничены, как до выключателей; ограничение включается файлом потолка
+        if (allowed.isEmpty()) return null;
         String host = uri.getHost();
         if (host == null || host.isEmpty()) {
             return "в адресе нет хоста";

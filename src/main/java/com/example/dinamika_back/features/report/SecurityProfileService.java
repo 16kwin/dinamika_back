@@ -532,7 +532,8 @@ public class SecurityProfileService {
         Map<String, Object> section = new LinkedHashMap<>();
         section.put("database", databaseAddress(environment.getProperty("spring.datasource.url")));
         List<String> allowed = ceiling.listParam(CeilingParam.NETWORK_OUTBOUND_ALLOWED);
-        boolean syncUsed = (ceiling.isOn(Feature.ORDERS) || ceiling.isOn(Feature.TESTSYNC)) && !allowed.isEmpty();
+        // Пустой список — исходящие не ограничены (как до выключателей)
+        boolean syncUsed = ceiling.isOn(Feature.ORDERS) || ceiling.isOn(Feature.TESTSYNC);
         section.put("syncService", syncUsed ? withoutCredentials(ceiling.param(CeilingParam.SYNC_SERVICE_URL)) : null);
         section.put("outboundAllowed", allowed);
         section.put("restTemplates", runtime.beanCount(RestTemplate.class));
