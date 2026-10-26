@@ -1386,7 +1386,7 @@ public class NomenclatureService {
     }
 
     @Transactional
-    public MaterialRatingDTO addRating(UUID materialUid, AddRatingRequest request) {
+    public MaterialRatingDTO addRating(UUID materialUid, AddRatingRequest request, String author) {
         SprMaterial material = materialRepository.findById(materialUid)
                 .orElseThrow(() -> new RuntimeException("Материал не найден: " + materialUid));
 
@@ -1395,20 +1395,21 @@ public class NomenclatureService {
         rating.setMaterial(material);
         rating.setRating(request.getRating());
         rating.setComment(request.getComment());
-        rating.setAuthor(request.getAuthor());
+        rating.setAuthor(author);
         rating.setCreatedAt(LocalDateTime.now());
         regRatingRepository.save(rating);
 
-        logEvent(materialUid, "ADD", "Добавлен отзыв от '" + request.getAuthor() + "': " + request.getRating() + " звезд", "Рейтинг", null, request.getRating().toString(), request.getAuthor());
+        logEvent(materialUid, "ADD", "Добавлен отзыв от '" + author + "': " + request.getRating() + " звезд", "Рейтинг", null, request.getRating().toString(), author);
 
         return new MaterialRatingDTO(rating.getUid(), materialUid, rating.getRating(), rating.getComment(), rating.getAuthor(), rating.getCreatedAt());
     }
 
     @Transactional
-    public void deleteRating(UUID ratingUid) {
+    public void deleteRating(UUID ratingUid, String author) {
         RegRating rating = regRatingRepository.findById(ratingUid).orElse(null);
         if (rating != null) {
-            logEvent(rating.getMaterial().getUid(), "DELETE", "Удален отзыв от '" + rating.getAuthor() + "'", "Рейтинг", rating.getRating().toString(), null, rating.getAuthor());
+            // в журнале автор события — кто удалил, а не автор отзыва
+            logEvent(rating.getMaterial().getUid(), "DELETE", "Удален отзыв от '" + rating.getAuthor() + "'", "Рейтинг", rating.getRating().toString(), null, author);
         }
         regRatingRepository.deleteById(ratingUid);
     }

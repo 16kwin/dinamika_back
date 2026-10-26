@@ -4,14 +4,17 @@ import com.example.dinamika_back.features.audit.AccessLogRepository;
 import com.example.dinamika_back.features.journal.FeatureJournal;
 import com.example.dinamika_back.features.journal.FeatureLogEntry;
 import com.example.dinamika_back.features.journal.JournalHmac;
+import com.example.dinamika_back.features.journal.StartupProfileAuditor;
 import com.example.dinamika_back.features.report.RuntimeInspector;
 import com.example.dinamika_back.features.report.SecurityProfileService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.info.BuildProperties;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.support.GenericApplicationContext;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
@@ -19,7 +22,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -104,6 +111,21 @@ class SecurityProfileServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void inboundDescribesAnonymousAccess() throws Exception {
+        Map<String, Object> inbound = (Map<String, Object>) service.report(viewer("ib", "SECURITY")).get("inbound");
+        List<Map<String, Object>> items = (List<Map<String, Object>>) inbound.get("items");
+        // standard: режим табло выключен — без входа только служебные адреса (пакет B5)
+        assertThat(items).anySatisfy(i -> {
+            assertThat(i.get("title")).isEqualTo("Анонимный доступ (режим табло, функция anonymous)");
+            assertThat(i.get("value")).isEqualTo("выключен");
+        });
+        assertThat(items).anySatisfy(i -> assertThat(i.get("title")).isEqualTo("Доверенные прокси (awms.security.trusted-proxies)"));
+        assertThat((List<String>) inbound.get("anonymous")).contains("GET /api/features/public")
+                .doesNotContain("GET /api/stations/static");
+    }
+
+    @Test
     void compositionIsDeterministic() throws Exception {
         Map<String, Object> first = new LinkedHashMap<>(service.report(viewer("ib", "SECURITY")));
         Map<String, Object> second = new LinkedHashMap<>(service.report(viewer("ib", "SECURITY")));
@@ -137,7 +159,7 @@ class SecurityProfileServiceTest {
         assertThat(header.get("journalHead")).isEqualTo(Map.of("id", last.getId(), "hash", last.getRowHash()));
         Map<String, Object> secrets = (Map<String, Object>) header.get("secrets");
         assertThat(secrets.get("state")).isEqualTo("repository");
-        assertThat((String) secrets.get("text")).contains("ключа HMAC журнала нет");
+        assertThat((String) secrets.get("text")).contains("ключ HMAC журнала не задан");
         assertThat(header.get("roleSource")).isEqualTo("token");
 
         // Значений секретов в отчёте нет — только их источник
@@ -255,6 +277,29 @@ class SecurityProfileServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void unverifiedJournalHeadIsWarnedInHeader(@TempDir Path logs) {
+        // Журнал не пуст, а строки головы в файловом логе нет (лог удалён или не пишется): не TAMPER, но шапка
+        // отчёта предупреждает — иначе удаление хвоста журнала вместе с логом видно только по бумаге
+        FeatureJournal journal = FeatureJournalTest.journal(journalRows, null, standard);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<FilterRegistrationBean<FeatureGateFilter>> gate = mock(ObjectProvider.class);
+        StartupProfileAuditor auditor = new StartupProfileAuditor(journal, new FeatureService(standard), logs, gate,
+                environment);
+        auditor.audit();
+        SecurityProfileService s = new SecurityProfileService(new FeatureService(standard), journal, provider(auditor),
+                provider(null), runtime, provider((JdbcTemplate) null), provider(null), environment, Clock.systemUTC(),
+                "test-host");
+        Map<String, Object> report = s.report(viewer("ib", "SECURITY"));
+        assertThat((List<String>) ((Map<String, Object>) report.get("header")).get("warnings"))
+                .anySatisfy(w -> assertThat(w).startsWith(StartupProfileAuditor.HEAD_UNVERIFIED)
+                        .contains("нет строки JOURNAL_HEAD"));
+        assertThat((String) ((Map<String, Object>) report.get("journal")).get("headCheck"))
+                .contains("нет строки JOURNAL_HEAD");
+        assertThat(journalRows.types()).doesNotContain("TAMPER");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void dependencyWarningsAreCollapsedIntoOneLine() {
         FeatureSnapshot noVideo = FeatureResolver.fromProperties(Map.of("awms.features.preset", "full",
                 "awms.features.video.enabled", "false"));
@@ -267,6 +312,64 @@ class SecurityProfileServiceTest {
                 .get("warnings");
         assertThat(warnings).noneMatch(w -> w.startsWith("Функция video."))
                 .anyMatch(w -> w.startsWith("Выключены вслед за функцией, от которой зависят: video.live, video.clips"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void camerasAndSyncAddressAreReportedWithoutSecrets() throws Exception {
+        // Пароль камеры с «@» (адрес как у стенда): URI его не разбирает — отчёт считает его так же, как FFmpeg
+        FeatureSnapshot full = FeatureResolver.fromProperties(Map.of("awms.features.preset", "full",
+                "sync.service.url", "http://saas:Sync-s3cret@saas.local:8085/api"));
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.queryForList(org.mockito.ArgumentMatchers.startsWith("SELECT rtsp_url"), org.mockito.ArgumentMatchers.eq(String.class)))
+                .thenReturn(List.of("rtsp://admin:Pa@ss-1@192.168.1.64:554/ISAPI/Streaming/Channels/101?transport=udp",
+                        "rtsp://admin@Cam-2.local:554/live", "file:C:/video/emulator.mp4"));
+        SecurityProfileService s = new SecurityProfileService(new FeatureService(full),
+                FeatureJournalTest.journal(new FeatureJournalTest.MemoryLog(), null, full), provider(null),
+                provider(null), runtime, provider(jdbc), provider(null), environment, Clock.systemUTC(), "test-host");
+
+        Map<String, Object> report = s.report(viewer("ib", "SECURITY"));
+        Map<String, Object> cameras = (Map<String, Object>) ((Map<String, Object>) report.get("outbound")).get("cameras");
+        assertThat(cameras.get("count")).isEqualTo(3);
+        assertThat(cameras.get("withPassword")).isEqualTo(1L);
+        assertThat((List<String>) cameras.get("hosts")).containsExactly("192.168.1.64", "cam-2.local");
+        assertThat(cameras.get("passwordInArgs")).isEqualTo(true);
+        Map<String, Object> sync = row((List<Map<String, Object>>) report.get("params"), "sync.service.url");
+        assertThat(sync.get("value")).isEqualTo("http://saas.local:8085/api");
+
+        String json = new ObjectMapper().writeValueAsString(report);
+        assertThat(json).doesNotContain("Pa@ss-1").doesNotContain("ss-1@").doesNotContain("Sync-s3cret");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void corsParamShowsEffectiveOriginsNotOnlyCeilingLine() throws Exception {
+        // Строка потолка только добавляет к прежнему списку SecurityConfig: отчёт показывает действующий список (бин),
+        // иначе на заводе ИБ видела бы один адрес сайта, а вход принимал бы и адреса сервера команды
+        FeatureSnapshot ceiling = FeatureResolver.fromProperties(Map.of("awms.features.preset", "isolated",
+                "awms.cors.allowed-origins", "https://awms.zavod.local"));
+        CorsConfiguration cors = new CorsConfiguration();
+        cors.setAllowedOrigins(List.of("http://localhost:3000", "https://dynamikaawms.ru", "https://awms.zavod.local"));
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", cors);
+        GenericApplicationContext context = new GenericApplicationContext();
+        context.registerBean("corsConfigurationSource", CorsConfigurationSource.class, () -> source);
+        context.refresh();
+        RuntimeInspector withCors = new RuntimeInspector(context, environment);
+        SecurityProfileService s = new SecurityProfileService(new FeatureService(ceiling),
+                FeatureJournalTest.journal(new FeatureJournalTest.MemoryLog(), null, ceiling), provider(null),
+                provider(null), withCors, provider((JdbcTemplate) null), provider(null), environment, Clock.systemUTC(),
+                "test-host");
+
+        Map<String, Object> row = row((List<Map<String, Object>>) s.report(viewer("ib", "SECURITY")).get("params"),
+                "awms.cors.allowed-origins");
+        assertThat(row.get("value")).isEqualTo("http://localhost:3000,https://dynamikaawms.ru,https://awms.zavod.local");
+        assertThat((String) row.get("origin")).startsWith("прежний список SecurityConfig").contains(" + ");
+
+        // Без бина CORS (контекст без веба) — как раньше: значение строки потолка
+        Map<String, Object> plain = row((List<Map<String, Object>>) service.report(viewer("ib", "SECURITY")).get("params"),
+                "awms.cors.allowed-origins");
+        assertThat((String) plain.get("origin")).doesNotStartWith("прежний список");
     }
 
     // ===================== Вспомогательное =====================

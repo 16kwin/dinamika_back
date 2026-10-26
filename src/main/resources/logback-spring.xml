@@ -3,15 +3,19 @@
     Логирование AWMS: как стандартное у Spring Boot (консоль, уровни logging.level.* из application.properties)
     плюс отдельный файл журнала безопасности для логгера AWMS.SECURITY (раздел 10.1 проекта «Дискретное отключение
     функций»): таблица функций при каждом старте и строка JOURNAL_HEAD id=… hash=… после каждой записи журнала
-    профиля. По этой строке при старте сверяется голова цепочки в БД: удаление хвоста журнала видно.
+    профиля (логгер AWMS.SECURITY.HEAD). По этой строке при старте сверяется голова цепочки в БД: удаление хвоста
+    журнала видно. Сверка принимает строку только целиком, в шаблоне аппендера ниже: при смене шаблона поправить и
+    StartupProfileAuditor.
 
     Файл — logs/awms-security.log относительно рабочего каталога службы (или каталога logging.file.path).
     Запись в каталог логов — только учётной записи службы, чтение — ИБ (deploy/INSTALL.md). При желании заказчика
     тот же логгер отправляется в syslog отдельным аппендером.
 
-    Стандартный base.xml не подключается целиком: он добавил бы файл spring.log во временный каталог, которого
-    сейчас нет. Подключаются его части: умолчания и консоль. Общий файл лога (logging.file.name) с этими настройками
-    не пишется: вывод консоли службы сохраняет обёртка службы (WinSW/NSSM, шаблоны deploy/service).
+    Стандартный base.xml не подключается целиком: он писал бы файл spring.log во временный каталог и тогда, когда
+    файл лога не задан. Подключаются его части: умолчания и консоль. Общий файл лога — как у Spring Boot без этого
+    файла: только при logging.file.name или logging.file.path, с теми же шаблоном и ротацией
+    (logging.logback.rollingpolicy.*); это делает OptionalLogFileAppender. Без этих настроек вывод консоли службы
+    сохраняет обёртка службы (WinSW/NSSM, шаблоны deploy/service).
 -->
 <configuration>
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
@@ -36,12 +40,29 @@
         </triggeringPolicy>
     </appender>
 
-    <!-- additivity по умолчанию: строки AWMS.SECURITY видны и в консоли службы -->
+    <!-- Общий файл лога: только если задан logging.file.name или logging.file.path (как у Spring Boot) -->
+    <appender name="FILE" class="com.example.dinamika_back.config.OptionalLogFileAppender">
+        <file>${LOG_FILE:-}</file>
+        <pattern>${FILE_LOG_PATTERN}</pattern>
+        <charset>${FILE_LOG_CHARSET}</charset>
+        <threshold>${FILE_LOG_THRESHOLD}</threshold>
+        <fileNamePattern>${LOGBACK_ROLLINGPOLICY_FILE_NAME_PATTERN:-}</fileNamePattern>
+        <cleanHistoryOnStart>${LOGBACK_ROLLINGPOLICY_CLEAN_HISTORY_ON_START:-false}</cleanHistoryOnStart>
+        <maxFileSize>${LOGBACK_ROLLINGPOLICY_MAX_FILE_SIZE:-10MB}</maxFileSize>
+        <totalSizeCap>${LOGBACK_ROLLINGPOLICY_TOTAL_SIZE_CAP:-0}</totalSizeCap>
+        <maxHistory>${LOGBACK_ROLLINGPOLICY_MAX_HISTORY:-7}</maxHistory>
+    </appender>
+
+    <!-- additivity по умолчанию: строки AWMS.SECURITY видны и в консоли службы (и в общем файле лога, если он задан) -->
     <logger name="AWMS.SECURITY" level="INFO">
         <appender-ref ref="AWMS_SECURITY_FILE"/>
     </logger>
+    <!-- Строки головы цепочки JOURNAL_HEAD: свой логгер (сверка при старте принимает только его строки), тот же файл.
+         Свой уровень: logging.level.AWMS.SECURITY=WARN не отключает запись головы -->
+    <logger name="AWMS.SECURITY.HEAD" level="INFO"/>
 
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
     </root>
 </configuration>

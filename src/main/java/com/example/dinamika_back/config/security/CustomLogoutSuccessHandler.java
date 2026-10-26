@@ -23,6 +23,7 @@ public class CustomLogoutSuccessHandler implements LogoutSuccessHandler {
     @Override
     public void onLogoutSuccess(HttpServletRequest request, HttpServletResponse response, Authentication authentication) throws IOException, ServletException {
         response.setStatus(HttpServletResponse.SC_OK);
-        refreshTokenService.deleteTokensByUser(authentication.getName());
+        // Выход без входа (токен уже истёк): cookie очищены, отзывать нечего. Раньше здесь был NPE и ответ 500
+        if (authentication != null) refreshTokenService.deleteTokensByUser(authentication.getName());
     }
 }

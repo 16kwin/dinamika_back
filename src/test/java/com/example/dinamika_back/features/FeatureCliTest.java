@@ -13,6 +13,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -83,12 +84,49 @@ class FeatureCliTest {
     }
 
     @Test
-    void missingFileMeansIsolated(@TempDir Path dir) {
+    void missingFileMeansFullAsBeforeSwitches(@TempDir Path dir) {
+        // Без файла потолка служба работает как до выключателей (пресет full) — CLI говорит то же и тем же отпечатком
         Result cli = run("print-features", "--config=" + dir.resolve("нет-файла.properties"));
         assertThat(cli.code()).isEqualTo(FeatureCli.OK);
-        assertThat(cli.out()).contains("Файл не найден").contains("isolated");
+        assertThat(cli.out()).contains("Файл не найден: служба применит пресет full")
+                .contains("по умолчанию: файла потолка нет")
+                .doesNotContain("isolated");
         assertThat(fingerprint(cli.out())).isEqualTo(FeatureResolver.resolveFile(dir.resolve("нет-файла.properties"))
                 .fingerprint());
+    }
+
+    @Test
+    void syncServiceUrlIsPrintedWithoutCredentials(@TempDir Path dir) throws Exception {
+        Path ceiling = dir.resolve("awms-features.properties");
+        Files.writeString(ceiling, String.join(System.lineSeparator(), "awms.features.preset=full",
+                "sync.service.url=http://saas:s3cret@saas.local:8085/api", ""));
+        Result cli = run("print-features", "--config=" + ceiling);
+        assertThat(cli.code()).as(cli.err()).isEqualTo(FeatureCli.OK);
+        assertThat(cli.out()).contains("sync.service.url = http://saas.local:8085/api").doesNotContain("s3cret");
+    }
+
+    @Test
+    void deployTemplatesPassServiceChecksAndStrictOnesAreStrict() {
+        // Шаблоны потолка (deploy/features) и справочник ключей проходят те же проверки, что при запуске службы
+        Path root = Path.of("").toAbsolutePath();
+        for (String name : List.of("deploy/features/isolated.properties", "deploy/features/standard.properties",
+                "deploy/features/full.properties", "config/awms-features.properties.example")) {
+            Result cli = run("print-features", "--config=" + root.resolve(name));
+            assertThat(cli.code()).as(name + ": " + cli.err()).isEqualTo(FeatureCli.OK);
+            // Строка CORS потолка только добавляет к прежнему списку — print-features так и говорит
+            assertThat(cli.out()).as(name).contains(CeilingParam.CORS_NOTE);
+        }
+        // Заводские пресеты включают строгий режим явными ключами (умолчания — как до выключателей)
+        for (String name : List.of("deploy/features/isolated.properties", "deploy/features/standard.properties")) {
+            FeatureSnapshot s = FeatureResolver.resolveFile(root.resolve(name));
+            assertThat(s.boolParam(CeilingParam.JOURNAL_REQUIRED)).as(name).isTrue();
+            assertThat(s.boolParam(CeilingParam.ORDERS_CALLBACK_KEY_REQUIRED)).as(name).isTrue();
+            assertThat(s.listParam(CeilingParam.NETWORK_OUTBOUND_ALLOWED)).as(name).containsExactly("none");
+            assertThat(s.listParam(CeilingParam.VIDEO_ALLOWED_NETWORKS)).as(name).isNotEmpty();
+            assertThat(s.listParam(CeilingParam.WEBSOCKET_ALLOWED_ORIGINS)).as(name).doesNotContain("*");
+        }
+        FeatureSnapshot full = FeatureResolver.resolveFile(root.resolve("deploy/features/full.properties"));
+        assertThat(full.boolParam(CeilingParam.JOURNAL_REQUIRED)).isFalse();
     }
 
     @Test

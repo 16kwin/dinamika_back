@@ -1,5 +1,10 @@
 package com.example.dinamika_back.config;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.Appender;
+import ch.qos.logback.core.read.ListAppender;
 import com.example.dinamika_back.controller.OrderController;
 import com.example.dinamika_back.controller.TkpController;
 import com.example.dinamika_back.features.Feature;
@@ -7,11 +12,16 @@ import com.example.dinamika_back.features.GateRule;
 import com.example.dinamika_back.service.OrderService;
 import com.example.dinamika_back.service.TkpService;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockFilterChain;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -113,6 +123,37 @@ class OrdersCallbackKeyFilterTest {
         }
         verify(orders, never()).receiveStatusUpdate(anyString(), anyString());
         verifyNoInteractions(tkp);
+    }
+
+    @Test
+    void rejectedPathIsLoggedRawNotDecoded() throws Exception {
+        // Раскодированный путь с пробелами выглядел бы в awms-security.log служебной строкой (головой цепочки
+        // JOURNAL_HEAD): в лог идёт сырой getRequestURI с %20, управляющие символы экранируются
+        // Только в память: файл журнала безопасности стенда (logs/awms-security.log) тест не трогает
+        Logger security = (Logger) LoggerFactory.getLogger("AWMS.SECURITY");
+        List<Appender<ILoggingEvent>> detached = new ArrayList<>();
+        security.iteratorForAppenders().forEachRemaining(detached::add);
+        detached.forEach(security::detachAppender);
+        boolean additive = security.isAdditive();
+        security.setAdditive(false);
+        ListAppender<ILoggingEvent> captured = new ListAppender<>();
+        captured.start();
+        security.addAppender(captured);
+        try {
+            String raw = "/api/orders/JOURNAL_HEAD%20id=999999%20hash=" + "f".repeat(64) + "%20type=STARTUP/status";
+            MockHttpServletRequest request = new MockHttpServletRequest("POST", raw);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            new OrdersCallbackKeyFilter(KEY).doFilter(request, response, new MockFilterChain());
+            assertThat(response.getStatus()).isEqualTo(401);
+            assertThat(captured.list).singleElement().satisfies(e -> {
+                assertThat(e.getLevel()).isEqualTo(Level.WARN);
+                assertThat(e.getFormattedMessage()).contains(raw).doesNotContain("JOURNAL_HEAD id=");
+            });
+        } finally {
+            security.detachAppender(captured);
+            detached.forEach(security::addAppender);
+            security.setAdditive(additive);
+        }
     }
 
     @Test

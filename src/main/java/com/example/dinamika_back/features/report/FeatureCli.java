@@ -38,10 +38,12 @@ import java.util.stream.Collectors;
  *
  * <ul>
  *   <li>{@code print-features [--config=<путь>]} — профиль функций из файла потолка: таблица функций, пресет,
- *       параметры безопасности с источником каждого значения, SHA-256 файла и отпечаток. Ключи белого списка служба
+ *       параметры безопасности с источником каждого значения, SHA-256 файла и отпечаток. Выключатели служба
  *       принимает только из файла потолка и умолчаний jar, поэтому отпечаток совпадает с отчётом «Профиль
- *       безопасности» даже без доступа к окружению службы. Те же проверки, что при запуске: ошибка в файле —
- *       код 2 и причина.</li>
+ *       безопасности» даже без доступа к окружению службы. Исключение — параметр безопасности, заданный службе
+ *       аргументом или переменной окружения (совместимость с прежними службами): служба его применяет, отпечаток
+ *       службы тогда другой, а отчёт называет такой параметр в предупреждениях. Те же проверки, что при запуске:
+ *       ошибка в файле — код 2 и причина.</li>
  *   <li>{@code help} — список команд.</li>
  * </ul>
  * Команды {@code init-secrets} и {@code create-user} регистрирует пакет B10 в {@link #COMMANDS}.
@@ -209,10 +211,11 @@ public final class FeatureCli {
             out.append("  Изменён:       ").append(modified(s.ceilingFile())).append(", владелец: ")
                     .append(owner(s.ceilingFile())).append('\n');
         } else {
-            out.append("  Файл не найден: служба применит пресет isolated («Изолированный минимум»)\n");
+            out.append("  Файл не найден: служба применит пресет ").append(s.preset().key()).append(" («")
+                    .append(s.preset().title()).append("»), как до выключателей\n");
         }
         out.append("  Пресет:        ").append(s.preset().key()).append(" («").append(s.preset().title()).append("»), ")
-                .append(presetSource(s.presetSource())).append('\n');
+                .append(presetSource(s.presetSource(), s.ceilingFileExists())).append('\n');
         out.append("  Основание:     ").append(s.ticket() == null ? "—" : s.ticket()).append('\n');
         out.append("  Отпечаток:     ").append(s.fingerprint()).append('\n');
         out.append("  Ревизия:       ").append(s.revision()).append(" (без переключателей администратора)\n");
@@ -231,9 +234,10 @@ public final class FeatureCli {
         out.append('\n');
         out.append("Параметры безопасности (значение, источник):\n");
         for (CeilingParam p : CeilingParam.values()) {
-            String value = s.param(p);
+            String value = display(p, s.param(p));
             out.append("  ").append(p.key()).append(" = ").append(value == null || value.isEmpty() ? "—" : value)
                     .append(" (").append(s.paramOrigin(p)).append(")\n");
+            if (p == CeilingParam.CORS_ALLOWED_ORIGINS) out.append("    ").append(CeilingParam.CORS_NOTE).append('\n');
         }
         List<String> warnings = new ArrayList<>(s.warnings());
         if (!warnings.isEmpty()) {
@@ -242,8 +246,18 @@ public final class FeatureCli {
         }
         out.append('\n');
         out.append("Сверка: отпечаток выше совпадает с шапкой отчёта «Профиль безопасности» и с записью STARTUP журнала,\n");
-        out.append("если служба запущена с этим файлом. Переопределять профиль окружением служба не даёт.\n");
+        out.append("если служба запущена с этим файлом. Выключатели awms.features.* окружением и аргументами не\n");
+        out.append("переопределяются (служба с ними не запустится). Параметр безопасности, заданный службе аргументом или\n");
+        out.append("переменной окружения, служба применяет с предупреждением — тогда её отпечаток другой, а отчёт называет\n");
+        out.append("такой параметр в предупреждениях шапки.\n");
         return out.toString();
+    }
+
+    /** Значение параметра для печати: адрес внешней системы — без логина и пароля */
+    static String display(CeilingParam p, String value) {
+        if (p != CeilingParam.SYNC_SERVICE_URL || value == null || value.isEmpty()) return value;
+        String safe = SecurityProfileService.withoutCredentials(value);
+        return safe != null ? safe : "(адрес не разобран, не печатается)";
     }
 
     private static String modified(Path file) {
@@ -263,10 +277,10 @@ public final class FeatureCli {
         }
     }
 
-    private static String presetSource(String source) {
+    private static String presetSource(String source, boolean fileExists) {
         return switch (source) {
             case "file" -> "из файла потолка";
-            case "default" -> "по умолчанию: пресет в файле не задан";
+            case "default" -> fileExists ? "по умолчанию: пресет в файле не задан" : "по умолчанию: файла потолка нет";
             case "jar" -> "из умолчаний jar";
             default -> source;
         };

@@ -16,6 +16,8 @@
 | `nginx/awms.conf.example` | nginx: только 443, ликвидатор service worker при выключенной PWA |
 | `check-surface.ps1`, `check-surface.sh` | проверка: порты, соединения, процессы, ffmpeg, ответы закрытых путей |
 
+Станции-шкафы, табло и анонимный доступ (с каких адресов) — раздел 11.
+
 В `config/` рядом: `awms-features.properties.example` — все ключи с пояснениями,
 `awms-secrets.properties.example` — образец файла секретов (без значений).
 
@@ -244,12 +246,12 @@ Linux: `config/` — `root:awms`, `750`, файлы `640`; `logs/` — `awms:<г
   403 «Invalid CORS request» — не войдёт никто. Живые обновления (WebSocket) после пакета B3 берут этот же
   список. Проверка: `curl -s -o /dev/null -w "%{http_code}" -H "Origin: https://<домен>" https://<домен>/api/features/public`
   → 200 (на Windows вместо `/dev/null` — `NUL`); с другим `Origin` — 403;
-- **адреса клиентов служба пока не видит.** Шаблон передаёт `X-Real-IP` и `X-Forwarded-For`, но служба их
-  не читает: для неё все запросы приходят с `127.0.0.1` — и в сводке отказов ворот, и в будущих журналах
-  доступа. До решения в пакетах B5/B6 адрес клиента смотреть в журнале nginx. Варианты решения: включить в
-  службе `server.forward-headers-strategy=native` с `server.tomcat.remoteip.internal-proxies=127\.0\.0\.1`
-  (доверять заголовкам только от nginx на этом же сервере) или читать `X-Forwarded-For` только от доверенного
-  прокси. После этого служба увидит и `https`, и строка CORS для своего домена станет не обязательна;
+- **адрес клиента** служба берёт из `X-Real-IP` и `X-Forwarded-For` только от доверенного прокси
+  (`awms.security.trusted-proxies`, умолчание `127.0.0.1,::1` — nginx на этом же сервере; раздел 11). Шаблон
+  ставит оба заголовка равными адресу соединения nginx, присланные клиентом не передаются. Адрес идёт в правила
+  анонимного доступа (`awms.security.anonymous.allowed-networks`) и в журналы профиля и доступа. Сводка отказов
+  ворот и колбэков заказов пока пишет адрес соединения (у них все клиенты — `127.0.0.1`), там адрес смотреть в
+  журнале nginx. Схему (`https`) служба из заголовков не берёт, поэтому строка CORS для своего домена нужна;
 - PWA выключена — вместо `/sw.js` отдаётся ликвидатор, `/manifest.json` и `/offline.html` → 404;
 - `client_max_body_size` в шаблоне — `20m`: выгрузки и печать (функция `export`, есть в `standard` и `full`)
   присылают всю таблицу в теле запроса, и при `1m` крупная таблица получит 413 от nginx. Если выключены и
@@ -299,3 +301,96 @@ sudo bash deploy/check-surface.sh --expect-off video,orders,websocket,pwa
     `-DAWMS_FEATURES_FILE=src/test/resources/features/test-full.properties -DAWMS_SECRETS_FILE=src/test/resources/features/test-secrets.properties`
   - VS Code: в `.vscode/settings.json` бэкенда
     `"java.test.config": { "vmArgs": ["-DAWMS_FEATURES_FILE=src/test/resources/features/test-full.properties", "-DAWMS_SECRETS_FILE=src/test/resources/features/test-secrets.properties"] }`
+
+---
+
+## 11. Станции-шкафы, табло и анонимный доступ
+
+Станции-шкафы и табло в цехе читают API **без входа** (режим табло, функция `anonymous`): иерархию и
+состояние станций (`/api/locations/hierarchy`, `/api/stations/static`, `/api/stations/dynamic`), файлы
+справочников (`/uploads/`), справочники на чтение, панели главной (`/api/dashboard/`), живые обновления
+(`/ws-stations/`). Изменять данные без входа нельзя — как и раньше.
+
+| Что выбрал безопасник | Строки в файле потолка | Что будет |
+|---|---|---|
+| Как сейчас (стенд, `full`) | ничего | без входа — с любого адреса сети |
+| Только устройства цеха | `awms.security.anonymous.allowed-networks=10.0.5.0/24,10.0.6.17` | без входа — только с этих адресов; с остальных анонимный запрос получает 401 |
+| Без анонимного доступа (`standard`, `isolated`) | `awms.features.anonymous.enabled=false` (в этих пресетах уже так) | станции и табло без входа не работают — нужна учётная запись; анонимный запрос получает 401 |
+
+Что важно:
+- вход, выход, `/csrf`, `/api/auth/*`, `/api/features/public` и `/error` работают **с любого адреса** —
+  войти можно с любого рабочего места; вошедших пользователей список адресов не касается;
+- в списке — сети CIDR (`10.0.5.0/24`) и отдельные адреса (`10.0.6.17`) через запятую, только цифрами
+  (IPv6 — так же). Имя узла (`tablo-1.zavod.local`) не принимается: правила не зависят от DNS. Ошибка в записи —
+  служба не запустится и назовёт ключ;
+- колбэки внешней системы заказов (при включённых заказах) — тоже запросы без входа: адрес внешней системы
+  внести в список. При `anonymous=false` колбэки работают; их защищает ключ `awms.orders.callback-key-required=true`;
+- при `anonymous=false` изменения заказов, ТКП и панелей из браузера идут с CSRF-токеном (фронтенд ставит его
+  сам); исключения CSRF у них остаются только в режиме табло.
+
+### Как узнать адреса станций и табло
+
+До ограничения неделю-две посмотреть, кто ходит в API без входа.
+
+**nginx** (обычный случай — служба за nginx). В `http {}` добавить формат журнала с признаком входа (по наличию
+cookie токена; значение cookie в журнал не пишется):
+
+```nginx
+map $http_cookie $awms_signed_in {
+    default 0;
+    "~(^|;\s*)(access|refresh)-token=" 1;
+}
+log_format awms_anon '$remote_addr [$time_local] "$request" $status signed_in=$awms_signed_in';
+```
+
+В `server {}` из шаблона: `access_log /var/log/nginx/awms-anon.log awms_anon;` (Windows: `logs/awms-anon.log`),
+затем `nginx -t` и `nginx -s reload`. Через неделю — адреса, которые без входа читают станции и табло:
+
+```bash
+grep 'signed_in=0' /var/log/nginx/awms-anon.log \
+  | grep -E '"(GET|POST) /(api/stations|api/locations|api/dashboard|api/nomenclature|uploads|ws-stations)' \
+  | awk '{print $1}' | sort | uniq -c | sort -rn
+```
+```powershell
+Select-String -Path C:\nginx\logs\awms-anon.log -Pattern 'signed_in=0' |
+  Where-Object { $_.Line -match '"(GET|POST) /(api/stations|api/locations|api/dashboard|api/nomenclature|uploads|ws-stations)' } |
+  ForEach-Object { ($_.Line -split ' ')[0] } | Group-Object | Sort-Object Count -Descending | Format-Table Count, Name
+```
+
+Станции и табло опрашивают API постоянно (раз в несколько секунд) — их адреса в начале списка. Рабочие места
+до входа грузят только страницу входа и `/api/features/public`, фильтр выше их не берёт. После проверки строку
+`access_log` можно убрать.
+
+**Tomcat** (станции ходят прямо на порт службы, без nginx). В `application.properties` рядом с jar или
+аргументами службы — **не в файле потолка** (там эти ключи отменяют запуск):
+
+```properties
+server.tomcat.accesslog.enabled=true
+server.tomcat.accesslog.directory=logs
+server.tomcat.accesslog.pattern=%a %t "%r" %s
+```
+
+Журнал — `logs/access_log.<дата>.log`, первый столбец — адрес. Признака входа в нём нет: смотреть пути станций
+и табло (`/api/stations/static`, `/api/stations/dynamic`, `/api/locations/hierarchy`, `/ws-stations/`) —
+постоянно их опрашивают только устройства. За nginx Tomcat видит адрес nginx (`127.0.0.1`) — тогда журнал nginx.
+
+### Проверка после ограничения
+
+- В логе службы при старте строка `Правила доступа: … анонимный доступ (режим табло) включён, только с адресов …`;
+  на странице «Безопасность» (раздел «Входящие») — те же адреса.
+- С устройства цеха: `curl -s -o /dev/null -w "%{http_code}" http://<сервер>/api/stations/static` → 200;
+  с другого компьютера → 401; вход с другого компьютера работает.
+- Отказы пишутся в `logs/awms-security.log` (логгер `AWMS.SECURITY`) с адресом и причиной — не чаще раза
+  в 10 минут на адрес. Забытое табло видно там: «Правила потолка: отклонён GET /api/stations/static с адреса …».
+
+### Адрес клиента за nginx
+
+Служба берёт адрес клиента из `X-Forwarded-For` и `X-Real-IP`, **только если запрос пришёл от доверенного
+прокси** — `awms.security.trusted-proxies`, умолчание `127.0.0.1,::1` (nginx на этом же сервере). От любого
+другого адреса заголовки не читаются: клиент, подключившийся к порту службы напрямую, не выдаст себя за табло.
+- nginx должен ставить заголовки сам: `proxy_set_header X-Real-IP $remote_addr;` и
+  `proxy_set_header X-Forwarded-For $remote_addr;` — как в шаблоне `nginx/awms.conf.example`. Если nginx
+  пропускает заголовок клиента как есть, клиент подставит любой адрес;
+- `X-Forwarded-For` читается справа налево, доверенные прокси пропускаются; если заголовки называют разные
+  адреса или в них не адрес — адрес неизвестен, анонимный запрос отклоняется;
+- nginx на другом сервере — его адрес в `awms.security.trusted-proxies`; пустая строка — заголовкам не верить.

@@ -33,9 +33,10 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Списки правил доступа по потолку и матрица ролей для отчёта: состав при isolated, standard и full, мёртвые
- * правила удалены, список колбэков берётся из реестра, роли функций — с HEAD и родителями. Запись роли SECURITY
- * сверяется со всеми маршрутами контроллеров.
+ * Списки правил доступа по потолку и матрица ролей для отчёта: состав при isolated, standard и full, прежняя
+ * анонимная поверхность — ровно как в SecurityConfig (вместе с правилами без маршрута), CSRF-исключения не шире
+ * прежних, список колбэков берётся из реестра, роли функций — с HEAD и родителями. Запись роли SECURITY сверяется
+ * со всеми маршрутами контроллеров.
  */
 class PublicEndpointsTest {
 
@@ -66,20 +67,75 @@ class PublicEndpointsTest {
     }
 
     @Test
-    void fullKeepsLegacySurfaceWithoutDeadRules() {
+    void fullDescribesLegacySurfaceAsInSecurityConfig() throws Exception {
         FeatureSnapshot s = ceiling("awms.features.preset", "full");
         List<String> anonymous = specs(PublicEndpoints.anonymous(s));
         assertThat(anonymous).contains("GET /api/locations/hierarchy", "POST /api/stations/static/filtered",
                 "GET /api/stations/dynamic/**", "/uploads/**", "/ws-stations/**", "GET /api/nomenclature/**",
-                "GET /api/stations/crud/**", "/api/orders/**", "/api/tkp/**", "/api/dashboard/**");
-        List<String> all = new ArrayList<>(specs(PublicEndpoints.withoutSignIn(s)));
-        all.addAll(specs(PublicEndpoints.csrfIgnored(s)));
-        assertThat(all).noneMatch(spec -> spec.contains("/api/locations/hierarchy/first")
-                || spec.contains("/photo") || spec.equals("POST /api/stations") || spec.contains("/api/users")
-                || spec.contains("animal_card") || spec.contains("/api/docs/") || spec.contains("/api/information")
-                || spec.contains("/api/notification") || spec.contains("/api/sync"));
-        assertThat(specs(PublicEndpoints.csrfIgnored(s))).contains("/ws-stations/**", "/api/orders/**",
-                "/api/tkp/**", "/api/dashboard/**", "POST /api/orders/*/status");
+                "GET /api/stations/crud/**", "/api/orders/**", "/api/tkp/**", "/api/dashboard/**",
+                // Правила без маршрута сохранены как в main: отчёт показывает то, что открыто на самом деле
+                "GET /api/locations/hierarchy/first", "GET /api/locations/*/photo", "POST /api/stations");
+        assertThat(anonymous).noneMatch(spec -> spec.contains("/api/users") || spec.contains("animal_card")
+                || spec.contains("/api/docs/") || spec.contains("/api/information") || spec.contains("/api/notification")
+                || spec.contains("/api/sync"));
+        // Справочники — те же, что в SecurityConfig
+        java.lang.reflect.Field books = SecurityConfig.class.getDeclaredField("REFERENCE_BOOKS");
+        books.setAccessible(true);
+        assertThat(PublicEndpoints.REFERENCE_BOOKS).containsExactly((String[]) books.get(null));
+        // CSRF-исключения при full — прежний список SecurityConfig, кроме /api/sync/** (testsync выключен: ворота 404)
+        assertThat(specs(PublicEndpoints.csrfIgnored(s))).containsExactly("/api/auth/login", "/api/auth/refresh_token",
+                "/csrf", "/ws-stations/**", "/api/orders/**", "/api/tkp/**", "/api/dashboard/**");
+        assertThat(specs(PublicEndpoints.csrfIgnored(ceiling("awms.features.preset", "full",
+                "awms.features.testsync.enabled", "true")))).contains("/api/sync/**");
+    }
+
+    /** Раздел «Входящие» отчёта: режим табло, сети станций и табло, доверенные прокси — по тем же параметрам, что слой */
+    @Test
+    void reportDescribesAnonymousAccess() {
+        Map<String, PublicEndpoints.AccessFact> full = facts(ceiling("awms.features.preset", "full"));
+        assertThat(full.get("Анонимный доступ (режим табло, функция anonymous)").value()).isEqualTo("включён");
+        PublicEndpoints.AccessFact anywhere = full.get("Анонимно — с адресов (awms.security.anonymous.allowed-networks)");
+        assertThat(anywhere.value()).isEqualTo("с любых");
+        assertThat(anywhere.ok()).isFalse();
+        assertThat(anywhere.note()).contains("deploy/INSTALL.md");
+        assertThat(full.get("Доверенные прокси (awms.security.trusted-proxies)").value()).isEqualTo("127.0.0.1, ::1");
+        assertThat(full.get("С любого адреса без входа").value()).contains("/api/auth/*", "/csrf", "GET /api/features/public");
+
+        Map<String, PublicEndpoints.AccessFact> limited = facts(ceiling("awms.features.preset", "full",
+                "awms.security.anonymous.allowed-networks", "10.0.5.0/24,10.0.6.17", "awms.security.trusted-proxies", ""));
+        PublicEndpoints.AccessFact devices = limited.get("Анонимно — с адресов (awms.security.anonymous.allowed-networks)");
+        assertThat(devices.value()).isEqualTo("10.0.5.0/24, 10.0.6.17");
+        assertThat(devices.ok()).isTrue();
+        assertThat(limited.get("Доверенные прокси (awms.security.trusted-proxies)").value()).isEqualTo("нет");
+
+        Map<String, PublicEndpoints.AccessFact> standard = facts(ceiling("awms.features.preset", "standard"));
+        assertThat(standard.get("Анонимный доступ (режим табло, функция anonymous)").ok()).isTrue();
+        assertThat(standard.get("Анонимно — с адресов (awms.security.anonymous.allowed-networks)").value())
+                .isEqualTo("не применяется");
+    }
+
+    private static Map<String, PublicEndpoints.AccessFact> facts(FeatureSnapshot s) {
+        Map<String, PublicEndpoints.AccessFact> facts = new HashMap<>();
+        for (PublicEndpoints.AccessFact f : PublicEndpoints.anonymousAccess(s)) facts.put(f.title(), f);
+        return facts;
+    }
+
+    /** CSRF-исключения при любом потолке не шире прежнего списка SecurityConfig */
+    @Test
+    void csrfExceptionsNeverWiderThanBefore() {
+        List<String> before = List.of("/api/auth/login", "/api/auth/refresh_token", "/csrf", "/ws-stations/**",
+                "/api/sync/**", "/api/orders/**", "/api/tkp/**", "/api/dashboard/**");
+        org.springframework.util.AntPathMatcher ant = new org.springframework.util.AntPathMatcher();
+        for (String preset : List.of("isolated", "standard", "full")) {
+            for (String anonymous : List.of("true", "false")) {
+                FeatureSnapshot s = ceiling("awms.features.preset", preset, "awms.features.anonymous.enabled", anonymous,
+                        "awms.features.testsync.enabled", "true", "awms.features.orders.enabled", "true");
+                for (PublicEndpoints.Endpoint e : PublicEndpoints.csrfIgnored(s)) {
+                    String sample = e.pattern().replace("**", "x").replace("*", "1");
+                    assertThat(before).as(e.spec()).anyMatch(b -> ant.match(b, sample));
+                }
+            }
+        }
     }
 
     @Test

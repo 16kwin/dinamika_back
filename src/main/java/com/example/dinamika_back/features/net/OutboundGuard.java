@@ -36,10 +36,11 @@ import java.util.Objects;
  *   <li>функция клиента включена ({@code features.require}: выключена → 404 {@code FeatureDisabledException});</li>
  *   <li>хост:порт итогового адреса есть в {@code awms.network.outbound.allowed} (потолок установки). Порт без явного
  *       указания — 80 для http и 443 для https; хост сравнивается без учёта регистра; другие схемы не допускаются.
- *       Пустой список (умолчание) — исходящих нет даже при включённых заказах.</li>
+ *       Пустой список (умолчание) — исходящие не ограничены, как до выключателей; {@value #NONE} — запрещены все.</li>
  * </ol>
  * Заблокированный запрос не уходит: WARN в лог {@code AWMS.SECURITY} — метод, хост, путь и причина, без заголовков
- * (там {@code X-API-Key}), тела и строки запроса. Запись {@code OUTBOUND_BLOCKED} в журнал профиля добавит B6.
+ * (там {@code X-API-Key}), тела и строки запроса, и запись {@code OUTBOUND_BLOCKED} в журнал профиля
+ * ({@link AccessAudit#outboundBlocked}; та же причина к тому же адресу — не чаще раза в 10 минут).
  * Разрешённый — событие {@code OUTBOUND_SENT} в журнал доступа: хост и путь, статус и размер ответа.
  *
  * <p>Клиент без функции ({@link #unbound}) не пропускает ничего: так закрыт любой RestTemplate и RestClient,
@@ -52,6 +53,8 @@ public final class OutboundGuard implements ClientHttpRequestInterceptor {
     public static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
     /** Таймаут чтения ответа */
     public static final Duration READ_TIMEOUT = Duration.ofSeconds(30);
+    /** Значение {@code awms.network.outbound.allowed}, запрещающее все исходящие (пустой список их не ограничивает) */
+    public static final String NONE = "none";
 
     private static final Logger SECURITY = LoggerFactory.getLogger("AWMS.SECURITY");
     /** Предел длины адреса в строке лога и журнала */
@@ -107,6 +110,7 @@ public final class OutboundGuard implements ClientHttpRequestInterceptor {
         String method = request.getMethod().name();
         String target = describe(uri);
         if (feature == null) {
+            // Клиента без функции служба не создаёт (DefaultDeny): журнал профиля для него не нужен, только лог
             throw blocked(method, target, null, "клиент не привязан к функции (нет сторожа функции)");
         }
         if (!features.isOn(feature)) {
@@ -117,14 +121,27 @@ public final class OutboundGuard implements ClientHttpRequestInterceptor {
         List<String> allowed = features.ceiling().listParam(CeilingParam.NETWORK_OUTBOUND_ALLOWED);
         String reason = check(uri, allowed);
         if (reason != null) {
-            throw blocked(method, target, feature, reason);
+            OutboundBlockedException blocked = blocked(method, target, feature, reason);
+            // Запись OUTBOUND_BLOCKED в журнал профиля (B6): сбой журнала отказ не меняет
+            try {
+                audit.outboundBlocked(feature, target, reason);
+            } catch (RuntimeException e) {
+                SECURITY.warn("Блокировка {} не записана в журнал профиля: {}", target, e.getMessage());
+            }
+            throw blocked;
         }
         ClientHttpResponse response = execution.execute(request, body);
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("method", method);
         details.put("status", response.getStatusCode().value());
         details.put("size", response.getHeaders().getContentLength());
-        audit.record(AccessAudit.Event.OUTBOUND_SENT, feature, target, details);
+        try {
+            audit.record(AccessAudit.Event.OUTBOUND_SENT, feature, target, details);
+        } catch (RuntimeException e) {
+            // Запрос уже ушёл и ответ получен: отказ вызывающему ничего не вернёт назад, сбой журнала — только в лог
+            SECURITY.warn("Исходящий запрос {} {} выполнен, но не записан в журнал доступа: {}", method, target,
+                    e.getMessage());
+        }
         return response;
     }
 
@@ -139,6 +156,9 @@ public final class OutboundGuard implements ClientHttpRequestInterceptor {
         }
         // Список не задан — исходящие не ограничены, как до выключателей; ограничение включается файлом потолка
         if (allowed.isEmpty()) return null;
+        if (allowed.stream().anyMatch(item -> NONE.equalsIgnoreCase(item.trim()))) {
+            return "awms.network.outbound.allowed=" + NONE + ": исходящие запросы запрещены потолком";
+        }
         String host = uri.getHost();
         if (host == null || host.isEmpty()) {
             return "в адресе нет хоста";
@@ -150,9 +170,7 @@ public final class OutboundGuard implements ClientHttpRequestInterceptor {
             HostPort entry = HostPort.parse(item, defaultPort);
             if (entry != null && entry.host().equals(host) && entry.port() == port) return null;
         }
-        return allowed.isEmpty()
-                ? "список awms.network.outbound.allowed пуст: исходящие запросы запрещены потолком"
-                : "хоста " + host + ":" + port + " нет в awms.network.outbound.allowed";
+        return "хоста " + host + ":" + port + " нет в awms.network.outbound.allowed";
     }
 
     /** Адрес для лога и журнала: схема, хост, порт и путь — без учётных данных, строки запроса и фрагмента */

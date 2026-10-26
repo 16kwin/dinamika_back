@@ -21,13 +21,15 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
- * Списки правил доступа SecurityConfig (раздел 6.6 проекта) и матрица ролей для отчёта «Профиль безопасности»
- * (раздел 9.2, п. 12). Списки — данные, а не код: их печатает отчёт (анонимные адреса, CSRF-исключения), по ним же
- * SecurityConfig ставит правила. Каждое правило — метод и шаблон AntPathMatcher: строковый {@code requestMatchers}
- * при Spring MVC разбирается PathPatternParser, а тот не допускает {@code **} в середине пути
- * ({@code /api/**}{@code /export-pdf}).
+ * Списки правил доступа (раздел 6.6 проекта) и матрица ролей для отчёта «Профиль безопасности» (раздел 9.2, п. 12).
+ * Списки — данные, а не код: их печатает отчёт (анонимные адреса, CSRF-исключения), по ним же слой правил потолка
+ * ({@link CeilingAccessFilter}) сужает доступ, а SecurityConfig собирает CSRF-исключения. Прежние правила доступа
+ * SecurityConfig остаются как в main и здесь только описаны ({@link #anonymous}). Каждое правило слоя — метод
+ * и шаблон AntPathMatcher: строковый {@code requestMatchers} при Spring MVC разбирается PathPatternParser, а тот
+ * не допускает {@code **} в середине пути ({@code /api/**}{@code /export-pdf}).
  *
  * <p>Состав зависит от потолка: разрешающее правило функции есть, только когда функция разрешена потолком.
  * Переключатели администратора (этап 2) правила не меняют — выключенную ими функцию закрывают ворота (404 до Security).
@@ -78,6 +80,13 @@ public final class PublicEndpoints {
     }
 
     /**
+     * Строка раздела «Входящие» отчёта об анонимном доступе: факт, значение и оценка (true — в порядке,
+     * false — риск, null — без оценки) с пояснением
+     */
+    public record AccessFact(String title, String value, Boolean ok, String note) {
+    }
+
+    /**
      * Строка матрицы ролей «роль → что может» при этом потолке.
      *
      * @param role            роль без префикса ROLE_
@@ -95,7 +104,10 @@ public final class PublicEndpoints {
                              boolean switchesEnable) {
     }
 
-    /** Справочники: читать (GET) без входа можно только в режиме табло, изменять — после входа и с CSRF-токеном */
+    /**
+     * Справочники: читать (GET) без входа можно только в режиме табло, изменять — после входа и с CSRF-токеном.
+     * Тот же список, что REFERENCE_BOOKS в SecurityConfig (сверяет PublicEndpointsTest)
+     */
     static final List<String> REFERENCE_BOOKS = List.of(
             "/api/nomenclature/**",
             "/api/templates/**",
@@ -131,11 +143,12 @@ public final class PublicEndpoints {
             new Endpoint(null, "/api/gpp/**", Feature.GPP));
 
     /**
-     * Режим табло (функция {@code anonymous}): анонимная поверхность в том виде, в каком она была до выключателей,
-     * без мёртвых правил. Станции, табло и колбэки могут ходить сюда без входа (риск 15.1 проекта), поэтому при
-     * {@code anonymous} поведение прежнее: в том числе {@code /api/orders/**} и {@code /api/tkp/**} целиком
-     * (решение пользователя: в пресете full — ровно как сейчас). Без {@code anonymous} без входа остаются только
-     * колбэки внешней системы из реестра
+     * Режим табло (функция {@code anonymous}): разрешающие правила SecurityConfig в том виде, в каком они в main, —
+     * в том числе правила без маршрута (иерархия /first, фото локаций, {@code POST /api/stations}): правила
+     * сервера не переписываются, а отчёт показывает то, что открыто на самом деле. Станции-шкафы и табло ходят сюда
+     * без входа (решение пользователя: по умолчанию как сейчас), в том числе {@code /api/orders/**} и
+     * {@code /api/tkp/**} целиком. Без {@code anonymous} слой потолка закрывает всё это анониму (401), без входа
+     * остаются только служебные адреса и колбэки внешней системы из реестра
      */
     private static final List<Endpoint> LEGACY_ANONYMOUS = buildLegacyAnonymous();
 
@@ -155,6 +168,15 @@ public final class PublicEndpoints {
      * методом POST, личные настройки вида и SockJS-транспорты живых обновлений
      */
     private static final List<Endpoint> SECURITY_WRITABLE = buildSecurityWritable();
+    /**
+     * С телефона и планшета: как у роли SECURITY, но без профиля безопасности и переключателей. Исключение —
+     * события просмотра и печати отчёта ({@code /events}): это запись аудита о том, кто смотрел, а не изменение данных
+     */
+    private static final List<Endpoint> VIEW_ONLY_WRITABLE = java.util.stream.Stream.concat(
+            SECURITY_WRITABLE.stream()
+                    .filter(e -> !e.pattern().startsWith("/api/security-profile") && !e.pattern().startsWith("/api/admin/features")),
+            java.util.stream.Stream.of(new Endpoint("POST", "/api/security-profile/events", null)))
+            .toList();
 
     private PublicEndpoints() {
     }
@@ -162,13 +184,16 @@ public final class PublicEndpoints {
     private static List<Endpoint> buildLegacyAnonymous() {
         List<Endpoint> list = new ArrayList<>();
         list.add(new Endpoint("GET", "/api/locations/hierarchy", null));
+        list.add(new Endpoint("GET", "/api/locations/hierarchy/first", null));      // маршрута нет
         list.add(new Endpoint("POST", "/api/stations/static/filtered", null));
         list.add(new Endpoint("POST", "/api/stations/dynamic/filtered", null));
+        list.add(new Endpoint("GET", "/api/locations/*/photo", null));             // маршрута нет
         list.add(new Endpoint(null, "/uploads/**", null));
         list.add(new Endpoint("GET", "/api/stations/static", null));
         list.add(new Endpoint("GET", "/api/stations/static/**", null));
         list.add(new Endpoint("GET", "/api/stations/dynamic", null));
         list.add(new Endpoint("GET", "/api/stations/dynamic/**", null));
+        list.add(new Endpoint("POST", "/api/stations", null));                     // маршрута нет
         list.add(new Endpoint(null, "/ws-stations/**", Feature.WEBSOCKET));
         for (String book : REFERENCE_BOOKS) list.add(new Endpoint("GET", book, null));
         list.add(new Endpoint(null, "/api/orders/**", Feature.ORDERS));
@@ -248,9 +273,11 @@ public final class PublicEndpoints {
     }
 
     /**
-     * Адреса без проверки CSRF-токена: всегда вход, обновление токена и выдача CSRF; при {@code websocket} —
-     * SockJS; при {@code testsync} — приём синхронизации; при {@code orders} — колбэки из реестра; в режиме табло —
-     * как раньше заказы, ТКП и панели целиком
+     * Адреса без проверки CSRF-токена — прежний список SecurityConfig, суженный по функциям: всегда вход,
+     * обновление токена и выдача CSRF; при {@code websocket} — SockJS; при {@code testsync} — приём синхронизации;
+     * в режиме табло — как раньше заказы, ТКП и панели целиком; без него — только колбэки заказов из реестра.
+     * Шире прежнего списка не бывает. При full (и без файла потолка) список совпадает с прежним, кроме
+     * {@code /api/sync/**}: testsync выключен, и эти пути отвечают 404 воротами раньше проверки CSRF
      */
     public static List<Endpoint> csrfIgnored(FeatureSnapshot ceiling) {
         List<Endpoint> list = new ArrayList<>();
@@ -259,19 +286,19 @@ public final class PublicEndpoints {
         list.add(new Endpoint(null, "/csrf", null));
         if (ceiling.isOn(Feature.WEBSOCKET)) list.add(new Endpoint(null, "/ws-stations/**", Feature.WEBSOCKET));
         if (ceiling.isOn(Feature.TESTSYNC)) list.add(new Endpoint(null, "/api/sync/**", Feature.TESTSYNC));
-        if (ceiling.isOn(Feature.ORDERS)) {
-            for (GateRule rule : Feature.ORDERS.callbacks()) {
-                list.add(new Endpoint(rule.method(), rule.pattern(), Feature.ORDERS));
-            }
-        }
         if (ceiling.isOn(Feature.ANONYMOUS)) {
             // Справочники здесь не перечислены: их изменения идут только с CSRF-токеном,
-            // фронтенд добавляет X-XSRF-TOKEN ко всем не-GET запросам (AxiosService)
+            // фронтенд добавляет X-XSRF-TOKEN ко всем не-GET запросам (AxiosService).
+            // Колбэки заказов отдельно не нужны: они внутри /api/orders/** и /api/tkp/**
             if (ceiling.isOn(Feature.ORDERS)) {
                 list.add(new Endpoint(null, "/api/orders/**", Feature.ORDERS));
                 list.add(new Endpoint(null, "/api/tkp/**", Feature.ORDERS));
             }
             if (ceiling.isOn(Feature.DASHBOARDS)) list.add(new Endpoint(null, "/api/dashboard/**", Feature.DASHBOARDS));
+        } else if (ceiling.isOn(Feature.ORDERS)) {
+            for (GateRule rule : Feature.ORDERS.callbacks()) {
+                list.add(new Endpoint(rule.method(), rule.pattern(), Feature.ORDERS));
+            }
         }
         return List.copyOf(list);
     }
@@ -281,8 +308,56 @@ public final class PublicEndpoints {
         return SECURITY_WRITABLE;
     }
 
+    /**
+     * Что меняющими методами можно с телефона, ТСД и планшета ({@link MobileReadOnlyFilter}): вход и выход,
+     * выгрузки, чтение методом POST, личные настройки вида, транспорты живых обновлений. Управлять установкой
+     * (профиль безопасности, переключатели) с телефона нельзя
+     */
+    public static List<Endpoint> viewOnlyWritable() {
+        return VIEW_ONLY_WRITABLE;
+    }
+
     private static List<Endpoint> enabledOnly(List<Endpoint> endpoints, FeatureSnapshot ceiling) {
         return endpoints.stream().filter(e -> e.feature() == null || ceiling.isOn(e.feature())).toList();
+    }
+
+    /**
+     * Анонимный доступ при этом потолке для отчёта: режим табло, с каких адресов, доверенные прокси и что открыто
+     * с любого адреса. Те же параметры, по которым работает {@link CeilingAccessFilter}
+     */
+    public static List<AccessFact> anonymousAccess(FeatureSnapshot ceiling) {
+        boolean board = ceiling.isOn(Feature.ANONYMOUS);
+        boolean external = !machine(ceiling).isEmpty();
+        List<String> networks = ceiling.listParam(CeilingParam.ANONYMOUS_ALLOWED_NETWORKS);
+        List<String> proxies = ceiling.listParam(CeilingParam.TRUSTED_PROXIES);
+        String networksKey = CeilingParam.ANONYMOUS_ALLOWED_NETWORKS.key();
+        List<AccessFact> facts = new ArrayList<>();
+        facts.add(new AccessFact("Анонимный доступ (режим табло, функция anonymous)", board ? "включён" : "выключен",
+                board ? null : true, board ? "станции-шкафы и табло читают API без входа: иерархия, станции, файлы "
+                + "справочников, справочники, панели, живые обновления — список «Доступно без входа»"
+                : "без входа — только служебные адреса" + (external ? " и колбэки внешних систем" : "")));
+        String scope = board ? "станции, табло" + (external ? " и внешние системы" : "")
+                : external ? "колбэки внешних систем" : null;
+        if (scope == null) {
+            facts.add(new AccessFact("Анонимно — с адресов (" + networksKey + ")", "не применяется", null,
+                    "анонимных запросов, кроме служебных адресов, нет"));
+        } else if (networks.isEmpty()) {
+            facts.add(new AccessFact("Анонимно — с адресов (" + networksKey + ")", "с любых", false,
+                    scope + " — с любого адреса сети. Ограничить адресами устройств цеха: строка " + networksKey
+                            + " в файле потолка (как узнать адреса — deploy/INSTALL.md, раздел 11)"));
+        } else {
+            facts.add(new AccessFact("Анонимно — с адресов (" + networksKey + ")", String.join(", ", networks), true,
+                    scope + " — только с этих адресов, с остальных без входа — 401"));
+        }
+        facts.add(new AccessFact("Доверенные прокси (" + CeilingParam.TRUSTED_PROXIES.key() + ")",
+                proxies.isEmpty() ? "нет" : String.join(", ", proxies), null, proxies.isEmpty()
+                ? "адрес клиента — всегда адрес соединения, X-Forwarded-For и X-Real-IP не читаются"
+                : "адрес клиента из X-Forwarded-For и X-Real-IP — только от этих адресов, от остальных — адрес "
+                + "соединения; подложный заголовок клиента не учитывается"));
+        facts.add(new AccessFact("С любого адреса без входа",
+                ALWAYS.stream().map(Endpoint::spec).collect(Collectors.joining(", ")), null,
+                "вход, выход, CSRF-токен, флаги функций до входа и страница ошибки"));
+        return List.copyOf(facts);
     }
 
     // ===================== Роли функций из потолка =====================

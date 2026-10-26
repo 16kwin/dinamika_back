@@ -1,11 +1,15 @@
 // SecurityConfig.java — ПОЛНЫЙ ФАЙЛ (добавлены /api/employees/**)
 // Правила — как в main, с добавлениями поверх: 3D, план цеха, ГПП, справочники только на чтение без входа,
-// флаги функций до входа (/api/features/public). Адреса CORS — прежние; файл потолка может только добавить свои
+// флаги функций до входа (/api/features/public). Адреса CORS — прежние; файл потолка может только добавить свои.
+// Поверх правил — слой потолка (CeilingAccessFilter, пакет B5): роли функций, выключение анонимного доступа,
+// сети станций и табло, роль SECURITY только читает. Он только сужает; без файла потолка и при full не меняет ничего
 package com.example.dinamika_back.config.security;
 
 import com.nimbusds.jose.crypto.DirectDecrypter;
 import com.nimbusds.jose.crypto.DirectEncrypter;
 import com.nimbusds.jose.jwk.OctetSequenceKey;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -22,16 +26,20 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.ExceptionTranslationFilter;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import com.example.dinamika_back.features.CeilingParam;
+import com.example.dinamika_back.features.Feature;
 import com.example.dinamika_back.features.FeatureConfigurationException;
 import com.example.dinamika_back.features.FeatureGateFilter;
 import com.example.dinamika_back.features.FeatureResolver;
+import com.example.dinamika_back.features.FeatureSnapshot;
 import com.example.dinamika_back.service.AuthService;
 import com.example.dinamika_back.service.RefreshTokenService;
 
@@ -44,6 +52,8 @@ import java.util.List;
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+
+    private static final Logger SECURITY_LOG = LoggerFactory.getLogger("AWMS.SECURITY");
 
     /** Справочники, открытые на чтение без входа: изменять их можно только после входа и с CSRF-токеном */
     private static final String[] REFERENCE_BOOKS = {
@@ -128,6 +138,17 @@ public class SecurityConfig {
             GetCsrfTokenFilter getCsrfTokenFilter,
             CsrfTokenRepository csrfTokenRepository) throws Exception {
 
+        FeatureSnapshot ceiling = FeatureResolver.resolve(environment);
+        CeilingAccessFilter ceilingAccess = new CeilingAccessFilter(ceiling);
+        logRules(ceiling, ceilingAccess);
+        // Без проверки CSRF-токена — прежний список, суженный по функциям потолка (не шире прежнего).
+        // Пути без метода — строками, как раньше; колбэки заказов из реестра — с методом (только без режима табло)
+        List<PublicEndpoints.Endpoint> csrfIgnored = PublicEndpoints.csrfIgnored(ceiling);
+        String[] csrfIgnoredPatterns = csrfIgnored.stream().filter(e -> e.method() == null)
+                .map(PublicEndpoints.Endpoint::pattern).toArray(String[]::new);
+        RequestMatcher[] csrfIgnoredCalls = csrfIgnored.stream().filter(e -> e.method() != null)
+                .map(PublicEndpoints.Endpoint::matcher).toArray(RequestMatcher[]::new);
+
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .addFilterAfter(getCsrfTokenFilter, ExceptionTranslationFilter.class)
@@ -191,27 +212,46 @@ public class SecurityConfig {
             .sessionManagement(sessionManagement -> sessionManagement
                     .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                     .sessionAuthenticationStrategy(tokenCookieSessionAuthenticationStrategy))
-            .csrf(csrf -> csrf
+            .csrf(csrf -> {
+                csrf
                     .csrfTokenRepository(csrfTokenRepository)
                     .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                    .ignoringRequestMatchers(
-                            "/api/auth/login",
-                            "/api/auth/refresh_token",
-                            "/csrf",
-                            "/ws-stations/**",
-                            "/api/sync/**",
-                            // Справочники (REFERENCE_BOOKS) здесь не перечислены: их изменения идут только с CSRF-токеном,
-                            // фронтенд добавляет X-XSRF-TOKEN ко всем не-GET запросам (AxiosService)
-                            "/api/orders/**",
-                            "/api/tkp/**",
-                            "/api/dashboard/**"
-                    )
+                    // Было: "/api/auth/login", "/api/auth/refresh_token", "/csrf", "/ws-stations/**", "/api/sync/**",
+                    // "/api/orders/**", "/api/tkp/**", "/api/dashboard/**". Теперь тот же список по функциям потолка
+                    // (PublicEndpoints.csrfIgnored): при full — тот же, /api/sync/** закрыт воротами (testsync выключен).
+                    // Справочники (REFERENCE_BOOKS) здесь не перечислены: их изменения идут только с CSRF-токеном,
+                    // фронтенд добавляет X-XSRF-TOKEN ко всем не-GET запросам (AxiosService)
+                    .ignoringRequestMatchers(csrfIgnoredPatterns)
                     .sessionAuthenticationStrategy((authentication, request, response) -> {
-                    }));
+                    });
+                if (csrfIgnoredCalls.length > 0) csrf.ignoringRequestMatchers(csrfIgnoredCalls);
+            })
+            // Слой потолка — после прежних правил: сюда доходят только пропущенные ими запросы, слой может только
+            // отказать (аноним — 401, вошедший — 403). Роль SECURITY вне профиля безопасности только читает (403)
+            .addFilterAfter(ceilingAccess, AuthorizationFilter.class)
+            .addFilterAfter(new SecurityRoleReadOnlyFilter(), CeilingAccessFilter.class)
+            // С телефона и планшета вошедший пользователь только смотрит (awms.mobile.read-only, по умолчанию да)
+            .addFilterAfter(new MobileReadOnlyFilter(ceiling.boolParam(CeilingParam.MOBILE_READ_ONLY)),
+                    SecurityRoleReadOnlyFilter.class);
 
         http.with(tokenCookieAuthenticationConfigurer, Customizer.withDefaults());
 
         return http.build();
+    }
+
+    /** Одна строка в лог AWMS.SECURITY при старте: что слой потолка сужает на этой установке */
+    private static void logRules(FeatureSnapshot ceiling, CeilingAccessFilter ceilingAccess) {
+        List<String> networks = ceiling.listParam(CeilingParam.ANONYMOUS_ALLOWED_NETWORKS);
+        SECURITY_LOG.info("Правила доступа: прежние правила SecurityConfig{}; анонимный доступ (режим табло) {}{}; "
+                        + "роли функций из потолка — {} правил(а); доверенные прокси: {}; роль SECURITY вне профиля "
+                        + "безопасности только читает",
+                ceilingAccess.narrows() ? " и слой потолка" : " без изменений",
+                ceiling.isOn(Feature.ANONYMOUS) ? "включён" : "выключен",
+                networks.isEmpty() ? (ceiling.isOn(Feature.ANONYMOUS) ? ", с любых адресов" : "")
+                        : ", только с адресов " + String.join(", ", networks),
+                PublicEndpoints.roleRules(ceiling).size(),
+                ceiling.listParam(CeilingParam.TRUSTED_PROXIES).isEmpty() ? "нет"
+                        : String.join(", ", ceiling.listParam(CeilingParam.TRUSTED_PROXIES)));
     }
 
     @Bean
@@ -234,7 +274,7 @@ public class SecurityConfig {
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-XSRF-TOKEN", "XSRF-TOKEN", "JSESSIONID", accessTokenCookieName, refreshTokenCookieName));
         // Ревизия профиля функций: фронтенд читает этот заголовок и при кросс-доменном API
-        configuration.setExposedHeaders(List.of(FeatureGateFilter.REVISION_HEADER));
+        configuration.setExposedHeaders(List.of(FeatureGateFilter.REVISION_HEADER, MobileReadOnlyFilter.READ_ONLY_HEADER));
         configuration.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
