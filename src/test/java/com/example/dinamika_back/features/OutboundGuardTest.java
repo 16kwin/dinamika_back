@@ -69,10 +69,17 @@ class OutboundGuardTest {
     /** Журнал доступа, который запоминает события */
     private static final class RecordingAudit implements AccessAudit {
         final List<Object[]> events = new ArrayList<>();
+        /** Записи OUTBOUND_BLOCKED в журнал профиля: функция, адрес, причина */
+        final List<Object[]> blocked = new ArrayList<>();
 
         @Override
         public void record(Event event, Feature feature, String objectRef, Map<String, ?> details) {
             events.add(new Object[]{event, feature, objectRef, details});
+        }
+
+        @Override
+        public void outboundBlocked(Feature feature, String target, String reason) {
+            blocked.add(new Object[]{feature, target, reason});
         }
     }
 
@@ -149,6 +156,30 @@ class OutboundGuardTest {
                 .hasMessageContaining("localhost:8085").hasMessageContaining("awms.network.outbound.allowed");
         server.verify();   // ожиданий нет: дошедший до сервера запрос провалил бы тест
         assertThat(audit.events).isEmpty();
+        // Блокировка — в журнал профиля (OUTBOUND_BLOCKED): адрес без строки запроса, причина
+        assertThat(audit.blocked).singleElement().satisfies(b -> {
+            assertThat(b[0]).isEqualTo(Feature.ORDERS);
+            assertThat(b[1]).isEqualTo("http://localhost:8085/v1/orders/u1");
+            assertThat((String) b[2]).contains("awms.network.outbound.allowed");
+        });
+    }
+
+    @Test
+    void noneForbidsAllOutboundAndIsJournaled() {
+        // none — запрещены все исходящие (пустой список их не ограничивает): строка шаблонов standard и isolated
+        RecordingAudit audit = new RecordingAudit();
+        RestTemplate client = ordersClient(features("awms.features.preset=full",
+                "awms.network.outbound.allowed=none"), audit);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(client).build();
+        for (String url : List.of(SAAS + "/v1/orders/u1", "https://none/v1", "http://127.0.0.1:80/")) {
+            assertThatThrownBy(() -> client.postForEntity(url, Map.of(), String.class)).as(url)
+                    .hasCauseInstanceOf(OutboundGuard.OutboundBlockedException.class)
+                    .hasMessageContaining("запрещены потолком");
+        }
+        server.verify();
+        assertThat(audit.events).isEmpty();
+        assertThat(audit.blocked).hasSize(3);
+        assertThat(OutboundGuard.check(URI.create("http://NONE/"), List.of("NONE"))).contains("запрещены");
     }
 
     @Test

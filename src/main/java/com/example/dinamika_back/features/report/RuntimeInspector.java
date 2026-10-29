@@ -6,6 +6,9 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import org.springframework.util.ClassUtils;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
@@ -99,6 +102,20 @@ public class RuntimeInspector {
         }
         String local = environment.getProperty("local.server.port");
         return local == null ? null : Integer.valueOf(local);
+    }
+
+    /**
+     * Адреса CORS, с которыми служба работает на самом деле: прежний список SecurityConfig и строка потолка
+     * {@code awms.cors.allowed-origins} — она только добавляет к прежнему списку. Пусто — источник CORS не найден
+     */
+    public List<String> corsOrigins() {
+        for (CorsConfigurationSource source : context.getBeansOfType(CorsConfigurationSource.class).values()) {
+            if (source instanceof UrlBasedCorsConfigurationSource url) {
+                CorsConfiguration all = url.getCorsConfigurations().get("/**");
+                if (all != null && all.getAllowedOrigins() != null) return List.copyOf(all.getAllowedOrigins());
+            }
+        }
+        return List.of();
     }
 
     /** Маршруты контроллеров: шаблон пути и методы (пусто — любой метод) */

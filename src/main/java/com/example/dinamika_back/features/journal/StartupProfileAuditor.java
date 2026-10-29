@@ -2,6 +2,7 @@ package com.example.dinamika_back.features.journal;
 
 import com.example.dinamika_back.features.CeilingParam;
 import com.example.dinamika_back.features.Feature;
+import com.example.dinamika_back.features.FeatureConfigurationException;
 import com.example.dinamika_back.features.FeatureGateFilter;
 import com.example.dinamika_back.features.FeatureService;
 import com.example.dinamika_back.features.FeatureSnapshot;
@@ -16,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.env.Environment;
@@ -45,8 +47,10 @@ import java.util.regex.Pattern;
  * Аудит профиля при каждом старте (раздел 10.1 проекта) — задача ядра, работает при любом потолке:
  * <ol>
  *   <li>проверяет HMAC-цепочку журнала профиля и сверяет голову цепочки в БД с последней строкой
- *       {@code JOURNAL_HEAD} файлового лога {@code logs/awms-security.log}. Нарушение → запись {@code TAMPER}
- *       (повторно о том же нарушении не пишет), WARN в лог и пометка в отчёте и профиле функций;</li>
+ *       {@code JOURNAL_HEAD} файлового лога {@code logs/awms-security.log} (только целой строкой логгера
+ *       {@value FeatureJournal#HEAD_LOGGER}). Нарушение → запись {@code TAMPER} (повторно о том же нарушении не
+ *       пишет), WARN в лог и пометка в отчёте и профиле функций. Журнал не пуст, а строки головы в логе нет — без
+ *       TAMPER, но с тем же WARN и пометкой «голова цепочки не сверена»;</li>
  *   <li>пишет {@code STARTUP} с полным профилем (все ключи белого списка с итоговыми значениями);</li>
  *   <li>если отпечаток, пресет или SHA-256 файла потолка отличаются от последнего {@code STARTUP}, пишет
  *       {@code CEILING_CHANGED} с разницей «было → стало» по ключам белого списка, основанием и SHA-256 файла.
@@ -55,17 +59,39 @@ import java.util.regex.Pattern;
  * Здесь же таймер сводки отказов ворот (поток ядра {@code feature-denied-summary}): раз в час отказы
  * {@link FeatureGateFilter#drainDenied()} уходят в журнал записью {@code DENIED_SUMMARY}.
  *
- * <p>Ошибка записи в журнал отменяет запуск: служба без журнала профиля для согласования непригодна.
+ * <p>Ошибка аудита (БД недоступна, нет прав на журнал) по умолчанию запуск не отменяет — служба работает, как до
+ * выключателей, а нарушение пишется в лог {@code AWMS.SECURITY}, отчёт и плашку ролям страницы «Безопасность». С
+ * {@code awms.journal.required=true} в файле потолка запуск отменяется: служба без журнала профиля для согласования
+ * непригодна.
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class StartupProfileAuditor implements ApplicationRunner, DisposableBean {
 
+    /** Начало строки нарушения «аудит запуска не выполнен» (отчёт выводит её в шапке) */
+    public static final String AUDIT_FAILED = "Журнал профиля: аудит запуска не выполнен — ";
+    /**
+     * Начало строки «голова цепочки не сверена»: журнал не пуст, а строки головы в файловом логе нет. Это не TAMPER
+     * (так бывает и без умысла), но удаление хвоста журнала вместе с логом сверка тогда не видит — отчёт выводит
+     * строку в шапке, профиль функций — в плашке
+     */
+    public static final String HEAD_UNVERIFIED = "Журнал профиля: голова цепочки не сверена — ";
     /** Файл журнала безопасности относительно каталога логов (logback-spring.xml) */
     public static final String SECURITY_LOG_NAME = "awms-security.log";
     /** Сколько прежних файлов журнала безопасности хранит ротация (logback-spring.xml) */
     static final int SECURITY_LOG_HISTORY = 20;
-    private static final Pattern HEAD = Pattern.compile(FeatureJournal.HEAD_MARKER + " id=(\\d+) hash=([0-9a-f]{64})");
+    /**
+     * Строка головы — только целиком и в формате файла awms-security.log (logback-spring.xml): время, INFO, поток,
+     * логгер {@value FeatureJournal#HEAD_LOGGER} и сообщение {@code JOURNAL_HEAD id=… hash=… type=…} без
+     * продолжения. Маркер внутри другого сообщения (путь запроса в WARN фильтра и т. п.) головой не считается:
+     * иначе голову цепочки подложил бы обычный HTTP-запрос
+     */
+    static final Pattern HEAD = headLine(FeatureJournal.HEAD_LOGGER);
+    /**
+     * Строка головы прежнего вида — общим логгером AWMS.SECURITY (до отдельного логгера головы). Принимается, только
+     * если строк нового вида нет ни в одном файле: первый запуск после обновления сверяет голову по старому логу
+     */
+    static final Pattern LEGACY_HEAD = headLine(FeatureJournal.SECURITY.getName());
     private static final Duration SUMMARY_PERIOD = Duration.ofHours(1);
     /** Пар «функция адрес» в одной записи DENIED_SUMMARY */
     private static final int SUMMARY_PAIRS = 100;
@@ -104,8 +130,31 @@ public class StartupProfileAuditor implements ApplicationRunner, DisposableBean 
 
     @Override
     public void run(ApplicationArguments args) {
-        audit();
+        try {
+            audit();
+        } catch (RuntimeException e) {
+            if (features.ceiling().boolParam(CeilingParam.JOURNAL_REQUIRED)) {
+                throw new FeatureConfigurationException("Журнал профиля не записан при запуске, а журналы обязательны "
+                        + "(awms.journal.required=true в файле потолка): " + cause(e), e);
+            }
+            // Как до выключателей: служба работает и без журнала профиля; нарушение видно в логе, отчёте и плашке
+            String problem = AUDIT_FAILED + cause(e);
+            Status previous = status;
+            List<String> problems = new ArrayList<>(previous.problems());
+            problems.add(problem);
+            status = new Status(previous.checked(), previous.chain(), previous.head(), List.copyOf(problems));
+            FeatureJournal.SECURITY.error("{}. Служба работает: awms.journal.required в файле потолка не задан", problem);
+            log.debug("Аудит запуска", e);
+        }
         startSummaryTimer();
+    }
+
+    /** Причина сбоя для лога, отчёта и плашки: сообщение исходной ошибки (БД), без текста SQL, не длиннее 300 знаков */
+    static String cause(Throwable e) {
+        Throwable root = NestedExceptionUtils.getMostSpecificCause(e);
+        String text = root.getMessage() == null ? root.getClass().getSimpleName() : root.getMessage();
+        text = text.replaceAll("\\s+", " ").trim();
+        return text.length() <= 300 ? text : text.substring(0, 299) + "…";
     }
 
     /** Проверка журнала и записи STARTUP / CEILING_CHANGED */
@@ -121,6 +170,8 @@ public class StartupProfileAuditor implements ApplicationRunner, DisposableBean 
             problems.add("Журнал профиля: " + head.text());
             tamper("head", head.logId(), head.text(), head);
         }
+        // Не нарушение и не TAMPER, но ИБ должна видеть: удаление хвоста журнала вместе с логом здесь не обнаружить
+        if (head.unverified()) problems.add(HEAD_UNVERIFIED + head.text());
         if (!journal.keyed()) {
             FeatureJournal.SECURITY.warn("Журнал профиля ведётся без ключа HMAC (awms.journal.hmac-key нет в файле "
                     + "секретов): цепочка SHA-256 выявляет правку записей, но не подделку администратором БД с "
@@ -195,40 +246,49 @@ public class StartupProfileAuditor implements ApplicationRunner, DisposableBean 
     }
 
     /**
-     * Сверка головы цепочки с файловым логом: последняя строка {@code JOURNAL_HEAD} (текущий файл, затем прежние
-     * файлы ротации) должна быть в БД с тем же хэшем. Записей после неё в БД может быть больше (сбой записи лога,
-     * другой экземпляр) — это не нарушение; нарушение — пропавшая или изменённая запись
+     * Сверка головы цепочки с файловым логом: последняя строка головы (текущий файл, затем прежние файлы ротации;
+     * строки прежнего вида — только если нового нет нигде) должна быть в БД с тем же хэшем. Записей после неё в БД
+     * может быть больше (сбой записи лога, другой экземпляр) — это не нарушение; нарушение — пропавшая или изменённая
+     * запись. Журнал не пуст, а головы в логе нет — не нарушение, но голова не сверена ({@link HeadCheck#unverified()})
      */
     public HeadCheck checkHead() {
-        Path found = null;
-        Long id = null;
-        String hash = null;
+        HeadLine head = null;
+        HeadLine legacy = null;
         for (Path file : securityLogFiles()) {
-            Matcher last = lastHead(file);
-            if (last != null) {
-                found = file;
-                id = Long.parseLong(last.group(1));
-                hash = last.group(2);
+            HeadLine last = lastHead(file);
+            if (last == null) continue;
+            if (!last.legacy()) {
+                head = last;
                 break;
             }
+            if (legacy == null) legacy = last;
         }
-        if (id == null) {
+        if (head == null) head = legacy;
+        if (head == null) {
             long count = journal.count();
-            return new HeadCheck(null, null, null, false, count == 0 ? "журнал пуст, сверять нечего"
-                    : "в файловом логе нет строки " + FeatureJournal.HEAD_MARKER + ": голова не сверена (первый "
-                    + "запуск с журналом или лог удалён)", logDir.resolve(SECURITY_LOG_NAME));
+            if (count == 0) {
+                return new HeadCheck(null, null, null, false, false, "журнал пуст, сверять нечего",
+                        logDir.resolve(SECURITY_LOG_NAME));
+            }
+            return new HeadCheck(null, null, null, false, true, "записей в журнале: " + count + ", а в файловом "
+                    + "логе " + logDir.resolve(SECURITY_LOG_NAME) + " нет строки " + FeatureJournal.HEAD_MARKER
+                    + " — файловый лог удалён, не пишется или служба запущена из другого каталога (logging.file.path)",
+                    logDir.resolve(SECURITY_LOG_NAME));
         }
+        long id = head.id();
+        String hash = head.hash();
+        Path found = head.file();
         Optional<FeatureLogEntry> row = journal.findById(id);
         if (row.isEmpty()) {
-            return new HeadCheck(id, hash, null, true, "в БД нет записи " + id + ", которая есть в файловом логе "
-                    + found.getFileName() + ": хвост журнала удалён", found);
+            return new HeadCheck(id, hash, null, true, false, "в БД нет записи " + id + ", которая есть в файловом "
+                    + "логе " + found.getFileName() + ": хвост журнала удалён", found);
         }
         if (!hash.equals(row.get().getRowHash())) {
-            return new HeadCheck(id, hash, row.get().getRowHash(), true, "запись " + id
+            return new HeadCheck(id, hash, row.get().getRowHash(), true, false, "запись " + id
                     + " в БД отличается от головы цепочки в файловом логе " + found.getFileName(), found);
         }
-        return new HeadCheck(id, hash, row.get().getRowHash(), false, "голова цепочки совпадает с файловым логом "
-                + "(запись " + id + ")", found);
+        return new HeadCheck(id, hash, row.get().getRowHash(), false, false, "голова цепочки совпадает с файловым "
+                + "логом (запись " + id + ")", found);
     }
 
     private List<Path> securityLogFiles() {
@@ -239,20 +299,38 @@ public class StartupProfileAuditor implements ApplicationRunner, DisposableBean 
         return files;
     }
 
-    /** Последняя строка головы в файле или null */
-    private static Matcher lastHead(Path file) {
+    /** Шаблон целой строки головы для логгера (шаблон аппендера AWMS_SECURITY_FILE в logback-spring.xml) */
+    private static Pattern headLine(String logger) {
+        return Pattern.compile("\\S+ +INFO \\[[^\\]]*\\] " + Pattern.quote(logger) + " : "
+                + FeatureJournal.HEAD_MARKER + " id=(\\d{1,18}) hash=([0-9a-f]{64}) type=[A-Z_]+");
+    }
+
+    /** Последняя строка головы в файле: нового вида, если она есть, иначе последняя прежнего вида; нет — null */
+    private static HeadLine lastHead(Path file) {
         if (!Files.isRegularFile(file)) return null;
         try {
             // Сама строка головы — ASCII; ISO-8859-1 читает любой байт без ошибок разбора
             List<String> lines = Files.readAllLines(file, StandardCharsets.ISO_8859_1);
+            HeadLine legacy = null;
             for (int i = lines.size() - 1; i >= 0; i--) {
-                Matcher m = HEAD.matcher(lines.get(i));
-                if (m.find()) return m;
+                String line = lines.get(i);
+                // matches(), а не find(): строка целиком, от времени до типа записи
+                Matcher m = HEAD.matcher(line);
+                if (m.matches()) return new HeadLine(Long.parseLong(m.group(1)), m.group(2), file, false);
+                if (legacy == null) {
+                    Matcher old = LEGACY_HEAD.matcher(line);
+                    if (old.matches()) legacy = new HeadLine(Long.parseLong(old.group(1)), old.group(2), file, true);
+                }
             }
+            return legacy;
         } catch (IOException e) {
             log.warn("Журнал безопасности {} не прочитан: {}", file, e.getMessage());
         }
         return null;
+    }
+
+    /** Найденная строка головы: номер, хэш, файл и вид (прежний — общим логгером AWMS.SECURITY) */
+    private record HeadLine(long id, String hash, Path file, boolean legacy) {
     }
 
     // ===================== Сводка отказов ворот =====================
@@ -380,14 +458,16 @@ public class StartupProfileAuditor implements ApplicationRunner, DisposableBean 
     /**
      * Сверка головы цепочки с файловым логом.
      *
-     * @param logId    номер записи из последней строки JOURNAL_HEAD или null — строки нет
-     * @param logHash  хэш из этой строки
-     * @param dbHash   хэш этой записи в БД или null — записи нет
-     * @param mismatch нарушение: записи нет или хэш другой
-     * @param text     итог словами
-     * @param file     файл, где найдена строка (или где искали)
+     * @param logId      номер записи из последней строки JOURNAL_HEAD или null — строки нет
+     * @param logHash    хэш из этой строки
+     * @param dbHash     хэш этой записи в БД или null — записи нет
+     * @param mismatch   нарушение: записи нет или хэш другой
+     * @param unverified голова не сверена: журнал не пуст, а строки головы в файловом логе нет (не нарушение)
+     * @param text       итог словами
+     * @param file       файл, где найдена строка (или где искали)
      */
-    public record HeadCheck(Long logId, String logHash, String dbHash, boolean mismatch, String text, Path file) {
+    public record HeadCheck(Long logId, String logHash, String dbHash, boolean mismatch, boolean unverified,
+                            String text, Path file) {
     }
 
     /**
@@ -396,7 +476,7 @@ public class StartupProfileAuditor implements ApplicationRunner, DisposableBean 
      * @param checked  аудит выполнен
      * @param chain    проверка цепочки
      * @param head     сверка головы с файловым логом
-     * @param problems нарушения словами (пусто — журнал цел)
+     * @param problems нарушения и несверенная голова словами (пусто — журнал цел и сверен с логом)
      */
     public record Status(boolean checked, FeatureJournal.Verification chain, HeadCheck head, List<String> problems) {
         static final Status NOT_CHECKED = new Status(false, null, null, List.of());

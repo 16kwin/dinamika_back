@@ -54,6 +54,8 @@ public class FeaturesController {
         Map<String, Object> ui = new LinkedHashMap<>();
         ui.put("inactivityMinutes", snapshot.intParam(CeilingParam.UI_INACTIVITY_MINUTES));
         ui.put("warningMinutes", snapshot.intParam(CeilingParam.UI_WARNING_MINUTES));
+        // С телефона и планшета только просмотр: интерфейс прячет запись, сервер её отклоняет (MobileReadOnlyFilter)
+        ui.put("mobileReadOnly", snapshot.boolParam(CeilingParam.MOBILE_READ_ONLY));
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("preset", snapshot.preset().key());
@@ -66,7 +68,8 @@ public class FeaturesController {
         body.put("canViewSecurity", canViewSecurity);
         body.put("canManage", features.canManage(authentication));
         if (canViewSecurity) {
-            // Нарушения журнала профиля (TAMPER) — плашка ролям страницы «Безопасность»; пусто — журнал цел
+            // Нарушения журнала профиля (TAMPER) и несверенная голова цепочки — плашка ролям страницы «Безопасность»;
+            // пусто — журнал цел и сверен с файловым логом
             StartupProfileAuditor audit = auditor.getIfAvailable();
             body.put("alerts", audit == null ? List.of() : audit.status().problems());
         }

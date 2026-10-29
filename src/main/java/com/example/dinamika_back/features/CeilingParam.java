@@ -1,6 +1,7 @@
 package com.example.dinamika_back.features;
 
 import com.example.dinamika_back.config.security.AppRoles;
+import com.example.dinamika_back.features.net.IpNetwork;
 import org.springframework.boot.context.properties.source.ConfigurationPropertyName;
 
 import java.util.List;
@@ -11,8 +12,9 @@ import java.util.regex.Pattern;
 
 /**
  * Параметры безопасности (раздел 4.5 проекта). Это не выключатели, но они входят в белый список потолка:
- * задаются только в файле потолка (или берутся из умолчаний jar), входят в отпечаток и показываются в отчёте
- * с источником. Переопределение окружением, аргументами или системными свойствами отменяет запуск.
+ * задаются в файле потолка (или берутся из умолчаний jar), входят в отпечаток и показываются в отчёте с источником.
+ * Значение из окружения, аргументов или системных свойств, как до выключателей, применяется с предупреждением в лог и
+ * шапку отчёта (служба сервера задаёт так порт и адрес); отпечаток службы тогда расходится с print-features.
  *
  * <p>Умолчания заданы здесь, а не в {@code application.properties} (кроме уже лежащих там {@code server.*},
  * {@code sync.service.url}, {@code video.ffmpeg-path}). {@code video.ffprobe-path} — сверх списка 4.5 (см. ниже). Пакеты-владельцы берут значения из снимка:
@@ -36,14 +38,42 @@ public enum CeilingParam {
     VIDEO_FFPROBE_PATH("video.ffprobe-path", "", Type.TEXT),
     /** Дополнительные адреса фронтенда для CORS: прежний список сервера и стенда — в SecurityConfig, эти добавляются к нему */
     CORS_ALLOWED_ORIGINS("awms.cors.allowed-origins", "", Type.LIST),
-    /** Адреса для WebSocket (B3); не задано — любой источник, как до выключателей */
+    /**
+     * Адреса для WebSocket (B3); не задано — «*», как до выключателей: своего сужения нет, но чужой Origin рукопожатия
+     * отсекает CORS Spring Security — проходят адреса CORS и тот же источник. Явный список сужает дальше
+     */
     WEBSOCKET_ALLOWED_ORIGINS("awms.websocket.allowed-origins", null, Type.LIST),
-    /** Разрешённые исходящие host:port (B3); пусто — не ограничены, как до выключателей (заказы ходят в sync.service.url) */
+    /**
+     * Разрешённые исходящие host:port (B3); пусто — не ограничены, как до выключателей (заказы ходят в sync.service.url);
+     * {@code none} — запрещены все
+     */
     NETWORK_OUTBOUND_ALLOWED("awms.network.outbound.allowed", "", Type.LIST),
+    /**
+     * Колбэки внешней системы заказов только с ключом X-API-Key (B3, OrdersCallbackKeyFilter). Умолчание false —
+     * как до выключателей; на заводе включается этим ключом в файле потолка
+     */
+    ORDERS_CALLBACK_KEY_REQUIRED("awms.orders.callback-key-required", "false", Type.BOOL),
+    /**
+     * Журналы обязательны (B6): ошибка записи журнала профиля отменяет запуск, а действие, не записанное в журнал
+     * доступа (живой просмотр, запись по кнопке, смена камеры), не выполняется. Умолчание false — сбой журнала
+     * пишется в лог AWMS.SECURITY, а служба работает как до выключателей; на заводе включается файлом потолка
+     */
+    JOURNAL_REQUIRED("awms.journal.required", "false", Type.BOOL),
     /** Источники file: и test: у камер (B2) */
     VIDEO_ALLOW_FILE_SOURCE("awms.video.allow-file-source", "false", Type.BOOL),
-    /** Сети камер (B2): проверяются по разрешённому IP в момент запуска ffmpeg */
+    /** Сети камер (B2): проверяются по разрешённому IP в момент запуска ffmpeg; пусто — любые, как до выключателей */
     VIDEO_ALLOWED_NETWORKS("awms.video.allowed-networks", "", Type.LIST),
+    /**
+     * Анонимный доступ (режим табло, функция anonymous) только с этих адресов (B5): сети CIDR и одиночные адреса
+     * станций-шкафов и табло цеха. Пусто — откуда угодно, как до выключателей. Вход, выход, CSRF-токен и флаги
+     * функций до входа работают с любого адреса. Адрес клиента за прокси — см. TRUSTED_PROXIES
+     */
+    ANONYMOUS_ALLOWED_NETWORKS("awms.security.anonymous.allowed-networks", "", Type.NETWORKS),
+    /**
+     * Доверенные прокси (B5): только от этих адресов служба берёт адрес клиента из X-Forwarded-For и X-Real-IP,
+     * от остальных — адрес соединения. Умолчание — nginx на этом же сервере; пусто — заголовкам не верить
+     */
+    TRUSTED_PROXIES("awms.security.trusted-proxies", "127.0.0.1,::1", Type.NETWORKS),
     /** Срок хранения видео, дней (B11): действует при любом состоянии video, «бессрочно» не допускается */
     VIDEO_RETENTION_DAYS("awms.video.retention-days", "30", Type.INT, 1, 3650),
     /** Стереть пароли камер при старте с выключенным video (B11) */
@@ -54,13 +84,25 @@ public enum CeilingParam {
     ADMIN_DISABLE_ROLES("awms.features.admin.disable-roles", "ADMIN,SECURITY", Type.ROLES),
     /** Кто, кроме SECURITY, включает обратно в режиме full; full без этого ключа отменяет запуск */
     ADMIN_ROLES("awms.features.admin.roles", "", Type.ROLES),
+    /**
+     * С телефона, ТСД и планшета — только просмотр (MobileReadOnlyFilter, решение команды): вошедший пользователь
+     * с такого устройства не меняет данные. Умолчание true; false — изменения с телефонов разрешены
+     */
+    MOBILE_READ_ONLY("awms.mobile.read-only", "true", Type.BOOL),
     /** Автоблокировка интерфейса, минут без действий (F2a) */
     UI_INACTIVITY_MINUTES("awms.ui.inactivity-minutes", "10", Type.INT, 1, 1440),
     /** За сколько минут до блокировки предупреждать */
     UI_WARNING_MINUTES("awms.ui.warning-minutes", "1", Type.INT, 0, 60);
 
+    /**
+     * Оговорка к {@link #CORS_ALLOWED_ORIGINS} для print-features и баннера запуска: строка потолка только добавляет
+     * адреса, без оговорки ИБ приняла бы её за полный список. Действующий список — в отчёте (бин SecurityConfig)
+     */
+    public static final String CORS_NOTE = "добавляется к прежнему списку SecurityConfig (localhost, 127.0.0.1:3000, "
+            + "адреса стенда и сервера команды); действующий список — в отчёте «Профиль безопасности», раздел «Параметры»";
+
     /** Тип значения: проверка и каноническая форма для отпечатка */
-    enum Type { TEXT, BOOL, PORT, INT, LIST, ROLES, ADMIN_MODE }
+    enum Type { TEXT, BOOL, PORT, INT, LIST, NETWORKS, ROLES, ADMIN_MODE }
 
     private static final Pattern ROLE = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
     private static final Set<String> ADMIN_MODES = Set.of("off", "disable-only", "full");
@@ -94,7 +136,7 @@ public enum CeilingParam {
         return name;
     }
 
-    /** Умолчание кода; для websocket-адресов — null (берутся адреса CORS) */
+    /** Умолчание кода; для websocket-адресов — null (FeatureResolver подставляет «*», как до выключателей) */
     String defaultValue() {
         return defaultValue;
     }
@@ -136,6 +178,20 @@ public enum CeilingParam {
                 for (String item : value.split(",")) {
                     String t = item.trim();
                     if (!t.isEmpty()) items.add(t);
+                }
+                return String.join(",", items);
+            }
+            case NETWORKS: {
+                // Список, как LIST, но каждая запись — сеть CIDR или адрес цифрами (без имён узлов и DNS)
+                Set<String> items = new TreeSet<>();
+                for (String item : value.split(",")) {
+                    String t = item.trim();
+                    if (t.isEmpty()) continue;
+                    if (IpNetwork.parse(t) == null) {
+                        throw invalid(raw, origin, "«" + t + "» — ожидаются сети вида 10.0.5.0/24 и адреса вида "
+                                + "10.0.6.17 через запятую (IPv6 — так же); имена узлов не допускаются");
+                    }
+                    items.add(t);
                 }
                 return String.join(",", items);
             }

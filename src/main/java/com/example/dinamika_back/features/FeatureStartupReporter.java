@@ -34,15 +34,18 @@ public class FeatureStartupReporter {
         FeatureSnapshot ceiling = features.ceiling();
         SECURITY.info(table(ceiling, port));
         if ("default".equals(ceiling.presetSource())) {
+            // Без пресета в потолке — полный набор функций, как до выключателей (так работает сервер команды).
+            // Заказчику в закрытом контуре набор сужает только файл потолка
             SECURITY.warn("""
 
                     ****************************************************************************************
-                    *  ПРОФИЛЬ ФУНКЦИЙ: ПРИМЕНЁН ИЗОЛИРОВАННЫЙ МИНИМУМ (isolated) — пресет в потолке не задан
+                    *  ПРОФИЛЬ ФУНКЦИЙ: пресет в потолке не задан — применён {} («{}»), как до выключателей
                     *  Файл потолка: {}{}
-                    *  Работает только ядро учёта. Это не поломка, а защита: положите файл потолка
-                    *  (шаблоны — deploy/features) или задайте путь в AWMS_FEATURES_FILE и перезапустите службу
+                    *  Набор функций — как до выключателей. Для закрытого контура положите файл потолка (шаблоны —
+                    *  deploy/features: standard, isolated) или задайте путь в AWMS_FEATURES_FILE и перезапустите службу
                     ****************************************************************************************""",
-                    ceiling.ceilingFile(), ceiling.ceilingFileExists() ? "" : " (не найден)");
+                    ceiling.preset().key(), ceiling.preset().title(), ceiling.ceilingFile(),
+                    ceiling.ceilingFileExists() ? "" : " (не найден)");
         }
         for (String warning : ceiling.warnings()) {
             SECURITY.warn(warning);
@@ -75,6 +78,7 @@ public class FeatureStartupReporter {
         for (CeilingParam p : CeilingParam.values()) {
             out.append("    ").append(p.key()).append(" = ").append(emptyAsDash(s.param(p)))
                     .append(" (").append(s.paramOrigin(p)).append(")\n");
+            if (p == CeilingParam.CORS_ALLOWED_ORIGINS) out.append("      ").append(CeilingParam.CORS_NOTE).append('\n');
         }
         return out.toString();
     }

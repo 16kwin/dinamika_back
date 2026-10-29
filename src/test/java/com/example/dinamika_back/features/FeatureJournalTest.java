@@ -1,8 +1,12 @@
 package com.example.dinamika_back.features;
 
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.encoder.PatternLayoutEncoder;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.Appender;
+import ch.qos.logback.core.FileAppender;
 import ch.qos.logback.core.read.ListAppender;
 import com.example.dinamika_back.features.journal.FeatureJournal;
 import com.example.dinamika_back.features.journal.FeatureLogEntry;
@@ -28,6 +32,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -39,6 +44,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -179,11 +186,13 @@ class FeatureJournalTest {
         FeatureLogEntry a = journal.append(event(FeatureLogEntry.Type.STARTUP));
         FeatureLogEntry b = journal.append(event(FeatureLogEntry.Type.PROBE_RUN));
 
-        List<String> heads = securityLog.messages().stream()
-                .filter(m -> m.startsWith(FeatureJournal.HEAD_MARKER)).toList();
-        assertThat(heads).containsExactly(
+        List<ILoggingEvent> heads = securityLog.events().stream()
+                .filter(e -> e.getFormattedMessage().startsWith(FeatureJournal.HEAD_MARKER)).toList();
+        assertThat(heads).extracting(ILoggingEvent::getFormattedMessage).containsExactly(
                 "JOURNAL_HEAD id=" + a.getId() + " hash=" + a.getRowHash() + " type=STARTUP",
                 "JOURNAL_HEAD id=" + b.getId() + " hash=" + b.getRowHash() + " type=PROBE_RUN");
+        // Свой логгер (дочерний к AWMS.SECURITY, тот же файл): сверка при старте принимает только его строки
+        assertThat(heads).extracting(ILoggingEvent::getLoggerName).containsOnly(FeatureJournal.HEAD_LOGGER);
     }
 
     @Test
@@ -280,17 +289,18 @@ class FeatureJournalTest {
         FeatureLogEntry second = journal.append(event(FeatureLogEntry.Type.STARTUP));
         journal.append(event(FeatureLogEntry.Type.STARTUP));
 
-        // Нет строки головы в логе — не нарушение, только пометка
+        // Нет строки головы в логе — не нарушение, но голова не сверена
         StartupProfileAuditor.HeadCheck none = auditor(journal, full, logs).checkHead();
         assertThat(none.mismatch()).isFalse();
-        assertThat(none.text()).contains("нет строки JOURNAL_HEAD");
+        assertThat(none.unverified()).isTrue();
+        assertThat(none.text()).contains("нет строки JOURNAL_HEAD").contains("записей в журнале: 3");
 
         // Голова в логе — запись 2: она в БД с тем же хэшем; записи после неё в БД — не нарушение
-        Files.writeString(logs.resolve("awms-security.log"), "2026-10-14T10:00:00.000+05:00  INFO [main] AWMS.SECURITY : "
-                + "JOURNAL_HEAD id=" + second.getId() + " hash=" + second.getRowHash() + " type=STARTUP\n"
+        Files.writeString(logs.resolve("awms-security.log"), headLine(second) + "\n"
                 + "2026-10-14T10:00:01.000+05:00  INFO [main] AWMS.SECURITY : Профиль функций AWMS\n");
         StartupProfileAuditor.HeadCheck ok = auditor(journal, full, logs).checkHead();
         assertThat(ok.mismatch()).isFalse();
+        assertThat(ok.unverified()).isFalse();
         assertThat(ok.logId()).isEqualTo(second.getId());
 
         // Хвост удалён: записи 2 и 3 в БД больше нет — нарушение, TAMPER пишется один раз
@@ -307,8 +317,7 @@ class FeatureJournalTest {
 
         // Голова в прежнем файле ротации тоже находится
         Files.delete(logs.resolve("awms-security.log"));
-        Files.writeString(logs.resolve("awms-security.1.log"), "JOURNAL_HEAD id=" + second.getId() + " hash="
-                + second.getRowHash() + " type=STARTUP\n");
+        Files.writeString(logs.resolve("awms-security.1.log"), headLine(second) + "\n");
         assertThat(auditor(journal, full, logs).checkHead().logId()).isEqualTo(second.getId());
     }
 
@@ -318,11 +327,123 @@ class FeatureJournalTest {
         FeatureSnapshot full = full();
         FeatureJournal journal = journal(log, KEY, full);
         FeatureLogEntry only = journal.append(event(FeatureLogEntry.Type.STARTUP));
-        Files.writeString(logs.resolve("awms-security.log"), "JOURNAL_HEAD id=" + only.getId() + " hash="
-                + "0".repeat(64) + " type=STARTUP\n");
+        Files.writeString(logs.resolve("awms-security.log"), headLine(FeatureJournal.HEAD_LOGGER, only.getId(),
+                "0".repeat(64)) + "\n");
         StartupProfileAuditor.HeadCheck check = auditor(journal, full, logs).checkHead();
         assertThat(check.mismatch()).isTrue();
         assertThat(check.text()).contains("отличается от головы цепочки");
+    }
+
+    @Test
+    void markerInsideAnotherMessageIsNotHead(@TempDir Path logs) throws IOException {
+        MemoryLog log = new MemoryLog();
+        FeatureSnapshot full = full();
+        FeatureJournal journal = journal(log, KEY, full);
+        journal.append(event(FeatureLogEntry.Type.STARTUP));
+        FeatureLogEntry second = journal.append(event(FeatureLogEntry.Type.STARTUP));
+        FeatureLogEntry third = journal.append(event(FeatureLogEntry.Type.STARTUP));
+        FeatureLogEntry fourth = journal.append(event(FeatureLogEntry.Type.STARTUP));
+        String forged = "JOURNAL_HEAD id=999999 hash=" + "f".repeat(64) + " type=STARTUP";
+        String older = "JOURNAL_HEAD id=" + second.getId() + " hash=" + second.getRowHash() + " type=STARTUP";
+
+        // Настоящая голова — запись 4; после неё — строки, где маркер стоит внутри других сообщений: путь колбэка
+        // (до исправления фильтр писал его раскодированным), INFO общего логгера, хвост после типа, чужой логгер
+        Files.writeString(logs.resolve("awms-security.log"), String.join("\n",
+                headLine(fourth),
+                "2026-10-14T10:00:01.000+05:00  WARN [http-nio-8084-exec-1] AWMS.SECURITY : Колбэк заказов отклонён "
+                        + "(401): POST /api/orders/" + forged + "/status с адреса 10.0.0.9 — нет заголовка X-API-Key",
+                "2026-10-14T10:00:02.000+05:00  INFO [main] AWMS.SECURITY : Профиль: " + forged,
+                "2026-10-14T10:00:03.000+05:00  INFO [main] AWMS.SECURITY.HEAD : " + forged + "/status",
+                "2026-10-14T10:00:04.000+05:00  INFO [main] AWMS.SECURITY.HEADX : " + forged,
+                "2026-10-14T10:00:05.000+05:00  INFO [main] com.example.Other : " + forged,
+                "2026-10-14T10:00:06.000+05:00  WARN [main] AWMS.SECURITY.HEAD : " + forged,
+                "2026-10-14T10:00:07.000+05:00  INFO [a] b] AWMS.SECURITY.HEAD : " + forged,
+                forged,
+                "Колбэк: " + older) + "\n");
+        StartupProfileAuditor.HeadCheck check = auditor(journal, full, logs).checkHead();
+        assertThat(check.logId()).isEqualTo(fourth.getId());
+        assertThat(check.mismatch()).isFalse();
+
+        // Администратор БД удалил хвост (записи 3 и 4) и подложил «голову» записи 2 HTTP-запросом — удаление видно
+        log.rows.remove(fourth.getId());
+        log.rows.remove(third.getId());
+        Files.writeString(logs.resolve("awms-security.log"), "2026-10-14T10:00:08.000+05:00  WARN [x] AWMS.SECURITY : "
+                + "Колбэк заказов отклонён (401): POST /api/orders/" + older + "/status\n", StandardOpenOption.APPEND);
+        StartupProfileAuditor.HeadCheck missing = auditor(journal, full, logs).checkHead();
+        assertThat(missing.logId()).isEqualTo(fourth.getId());
+        assertThat(missing.mismatch()).isTrue();
+        assertThat(missing.text()).contains("хвост журнала удалён");
+    }
+
+    @Test
+    void headWrittenByRealLogPatternIsFound(@TempDir Path logs) throws IOException {
+        // Шаблон аппендера из logback-spring.xml: сверка находит строки, которые пишет сам журнал, и не принимает
+        // маркер из чужого сообщения того же файла
+        MemoryLog log = new MemoryLog();
+        FeatureSnapshot full = full();
+        FeatureJournal journal = journal(log, KEY, full);
+        Appender<ILoggingEvent> file = securityLog.toFile(logs.resolve("awms-security.log"));
+        FeatureLogEntry last;
+        try {
+            journal.append(event(FeatureLogEntry.Type.STARTUP));
+            last = journal.append(event(FeatureLogEntry.Type.CEILING_CHANGED));
+            FeatureJournal.SECURITY.warn("Колбэк заказов отклонён (401): POST {} — нет заголовка",
+                    "/api/orders/JOURNAL_HEAD id=999999 hash=" + "e".repeat(64) + " type=STARTUP/status");
+            FeatureJournal.SECURITY.info("JOURNAL_HEAD id=999998 hash={} type=STARTUP", "d".repeat(64));
+        } finally {
+            securityLog.stopFile(file);
+        }
+        StartupProfileAuditor.HeadCheck check = auditor(journal, full, logs).checkHead();
+        assertThat(check.logId()).isEqualTo(last.getId());
+        assertThat(check.mismatch()).isFalse();
+        assertThat(check.text()).contains("совпадает");
+    }
+
+    @Test
+    void legacyHeadLinesAreUsedOnlyWithoutNewOnes(@TempDir Path logs) throws IOException {
+        MemoryLog log = new MemoryLog();
+        FeatureSnapshot full = full();
+        FeatureJournal journal = journal(log, KEY, full);
+        FeatureLogEntry first = journal.append(event(FeatureLogEntry.Type.STARTUP));
+        FeatureLogEntry second = journal.append(event(FeatureLogEntry.Type.STARTUP));
+
+        // Первый запуск после обновления: в логе только строки прежнего вида (общий логгер AWMS.SECURITY)
+        Files.writeString(logs.resolve("awms-security.1.log"), headLine("AWMS.SECURITY", first.getId(),
+                first.getRowHash()) + "\n");
+        Files.writeString(logs.resolve("awms-security.log"), headLine("AWMS.SECURITY", second.getId(),
+                second.getRowHash()) + "\n");
+        assertThat(auditor(journal, full, logs).checkHead().logId()).isEqualTo(second.getId());
+
+        // Есть строка нового вида (даже в прежнем файле ротации) — строки прежнего вида больше не учитываются
+        Files.writeString(logs.resolve("awms-security.1.log"), headLine(first) + "\n");
+        Files.writeString(logs.resolve("awms-security.log"), headLine("AWMS.SECURITY", 999_999L, "c".repeat(64))
+                + "\n");
+        StartupProfileAuditor.HeadCheck check = auditor(journal, full, logs).checkHead();
+        assertThat(check.logId()).isEqualTo(first.getId());
+        assertThat(check.mismatch()).isFalse();
+    }
+
+    @Test
+    void unverifiedHeadIsWarnedButIsNotTamper(@TempDir Path logs) {
+        MemoryLog log = new MemoryLog();
+        FeatureSnapshot full = full();
+        // Пустой журнал: первый запуск — сверять нечего, пометки нет
+        StartupProfileAuditor firstStart = auditor(journal(log, KEY, full), full, logs);
+        firstStart.audit();
+        assertThat(firstStart.status().head().unverified()).isFalse();
+        assertThat(firstStart.status().problems()).isEmpty();
+
+        // Журнал не пуст, а файлового лога нет (удалён или не пишется): не TAMPER, но пометка в статусе и WARN
+        StartupProfileAuditor auditor = auditor(journal(log, KEY, full), full, logs);
+        auditor.audit();
+        assertThat(auditor.status().head().unverified()).isTrue();
+        assertThat(auditor.status().problems()).singleElement().satisfies(p ->
+                assertThat(p).startsWith(StartupProfileAuditor.HEAD_UNVERIFIED).contains("нет строки JOURNAL_HEAD"));
+        assertThat(log.types()).doesNotContain("TAMPER");
+        assertThat(securityLog.events()).anySatisfy(e -> {
+            assertThat(e.getLevel()).isEqualTo(Level.WARN);
+            assertThat(e.getFormattedMessage()).startsWith(StartupProfileAuditor.HEAD_UNVERIFIED);
+        });
     }
 
     @Test
@@ -357,6 +478,16 @@ class FeatureJournalTest {
 
     private static FeatureSnapshot full() {
         return FeatureResolver.fromProperties(Map.of("awms.features.preset", "full"));
+    }
+
+    /** Строка головы, как её пишет журнал в awms-security.log (шаблон logback-spring.xml) */
+    static String headLine(FeatureLogEntry entry) {
+        return headLine(FeatureJournal.HEAD_LOGGER, entry.getId(), entry.getRowHash());
+    }
+
+    static String headLine(String logger, long id, String hash) {
+        return "2026-10-14T10:00:00.000+05:00  INFO [main] " + logger + " : JOURNAL_HEAD id=" + id + " hash=" + hash
+                + " type=STARTUP";
     }
 
     private static FeatureJournal.Event event(FeatureLogEntry.Type type) {
@@ -404,6 +535,40 @@ class FeatureJournalTest {
 
         List<String> messages() {
             return appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+        }
+
+        List<ILoggingEvent> events() {
+            return List.copyOf(appender.list);
+        }
+
+        /** На время теста — ещё и в файл, как аппендер AWMS_SECURITY_FILE (тот же шаблон из logback-spring.xml) */
+        Appender<ILoggingEvent> toFile(Path file) throws IOException {
+            String xml;
+            try (var in = FeatureJournalTest.class.getClassLoader().getResourceAsStream("logback-spring.xml")) {
+                assertThat(in).as("logback-spring.xml в classpath").isNotNull();
+                xml = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            Matcher m = Pattern.compile("<appender name=\"AWMS_SECURITY_FILE\"[\\s\\S]*?<pattern>([^<]+)</pattern>")
+                    .matcher(xml);
+            assertThat(m.find()).as("шаблон аппендера AWMS_SECURITY_FILE").isTrue();
+            LoggerContext context = logger.getLoggerContext();
+            PatternLayoutEncoder encoder = new PatternLayoutEncoder();
+            encoder.setContext(context);
+            encoder.setPattern(m.group(1));
+            encoder.setCharset(StandardCharsets.UTF_8);
+            encoder.start();
+            FileAppender<ILoggingEvent> fileAppender = new FileAppender<>();
+            fileAppender.setContext(context);
+            fileAppender.setFile(file.toString());
+            fileAppender.setEncoder(encoder);
+            fileAppender.start();
+            logger.addAppender(fileAppender);
+            return fileAppender;
+        }
+
+        void stopFile(Appender<ILoggingEvent> fileAppender) {
+            logger.detachAppender(fileAppender);
+            fileAppender.stop();
         }
 
         @Override

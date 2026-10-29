@@ -148,7 +148,7 @@ public class SecurityProfileService {
         report.put("viewer", viewer(viewer, purgeAvailable));
         report.put("header", header(snapshot, ceiling, chain, roleSource, dbUser, warnings));
         report.put("features", features(snapshot, roleSource));
-        report.put("params", params(ceiling));
+        report.put("params", params(ceiling, runtime.corsOrigins()));
         report.put("absent", absent());
         report.put("runtime", runtime.runtimeChecks().stream().map(c -> check(c.text(), c.ok())).toList());
         report.put("inbound", inbound(snapshot, ceiling, routes, port));
@@ -223,6 +223,13 @@ public class SecurityProfileService {
         StartupProfileAuditor.Status status = auditorStatus();
         if (status != null && status.head() != null && status.head().mismatch()) {
             warnings.add("Журнал профиля: " + status.head().text());
+        }
+        if (status != null) {
+            // Сбой аудита при старте (БД без прав на журнал и т. п.): служба работает, журнал профиля не пополнен.
+            // Голова цепочки не сверена (журнал не пуст, а файлового лога нет): удаление хвоста журнала вместе с логом
+            // иначе не видно нигде, кроме сверки с бумагой
+            status.problems().stream().filter(p -> p.startsWith(StartupProfileAuditor.AUDIT_FAILED)
+                    || p.startsWith(StartupProfileAuditor.HEAD_UNVERIFIED)).forEach(warnings::add);
         }
         if (Boolean.TRUE.equals(dbUser.get("superuser"))) {
             warnings.add("Приложение работает под суперпользователем БД (" + dbUser.get("name") + "): журналы и "
@@ -299,7 +306,7 @@ public class SecurityProfileService {
             state = "partial";
             text = "часть секретов не задана или задана вне файла секретов установки";
         }
-        if (!journal.keyed()) text += "; ключа HMAC журнала нет — цепочка журнала без ключа";
+        if (!journal.keyed()) text += "; ключ HMAC журнала не задан — цепочка журнала без ключа";
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("state", state);
         result.put("text", text);
@@ -430,14 +437,25 @@ public class SecurityProfileService {
 
     // ===================== Параметры и отсутствующее =====================
 
-    private static List<Map<String, Object>> params(FeatureSnapshot ceiling) {
+    /**
+     * Параметры безопасности; {@code cors} — действующие адреса CORS (бин SecurityConfig): строка потолка
+     * {@code awms.cors.allowed-origins} только добавляет к прежнему списку, и одна она занизила бы список для ИБ
+     */
+    static List<Map<String, Object>> params(FeatureSnapshot ceiling, List<String> cors) {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (CeilingParam p : CeilingParam.values()) {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("key", p.key());
-            row.put("value", ceiling.param(p));
+            // Адрес внешней системы — без логина и пароля; остальные параметры секретов не содержат
+            row.put("value", FeatureCli.display(p, ceiling.param(p)));
             row.put("origin", ceiling.paramOrigin(p));
             row.put("title", PARAM_TITLES.get(p));
+            if (p == CeilingParam.CORS_ALLOWED_ORIGINS && cors != null && !cors.isEmpty()) {
+                String configured = ceiling.param(p);
+                row.put("value", String.join(",", cors));
+                row.put("origin", "прежний список SecurityConfig (как до выключателей)"
+                        + (configured == null || configured.isBlank() ? "" : " + " + ceiling.paramOrigin(p)));
+            }
             rows.add(row);
         }
         return rows;
@@ -455,16 +473,27 @@ public class SecurityProfileService {
         t.put(CeilingParam.SYNC_SERVICE_URL, "Адрес внешней системы заказов (без разрешённых исходящих не используется)");
         t.put(CeilingParam.VIDEO_FFMPEG_PATH, "Путь к ffmpeg");
         t.put(CeilingParam.VIDEO_FFPROBE_PATH, "Путь к ffprobe (пусто — рядом с ffmpeg)");
-        t.put(CeilingParam.CORS_ALLOWED_ORIGINS, "Адреса фронтенда для CORS");
-        t.put(CeilingParam.WEBSOCKET_ALLOWED_ORIGINS, "Адреса для WebSocket");
-        t.put(CeilingParam.NETWORK_OUTBOUND_ALLOWED, "Разрешённые исходящие соединения (хост:порт)");
+        t.put(CeilingParam.CORS_ALLOWED_ORIGINS, "Адреса фронтенда для CORS — действующие: прежний список SecurityConfig "
+                + "и строка потолка (она только добавляет)");
+        t.put(CeilingParam.WEBSOCKET_ALLOWED_ORIGINS, "Адреса для WebSocket (* — без сужения: адреса CORS и тот же "
+                + "источник)");
+        t.put(CeilingParam.NETWORK_OUTBOUND_ALLOWED, "Разрешённые исходящие соединения (хост:порт; пусто — не ограничены, "
+                + "none — запрещены все)");
+        t.put(CeilingParam.ORDERS_CALLBACK_KEY_REQUIRED, "Колбэки внешней системы заказов только с ключом X-API-Key");
+        t.put(CeilingParam.JOURNAL_REQUIRED, "Журналы обязательны: без записи в журнал служба не запускается, "
+                + "просмотр видео и смена камеры не выполняются");
+        t.put(CeilingParam.ANONYMOUS_ALLOWED_NETWORKS, "Анонимный доступ (станции, табло) только с этих адресов "
+                + "(пусто — с любых)");
+        t.put(CeilingParam.TRUSTED_PROXIES, "Доверенные прокси: только от них адрес клиента берётся из X-Forwarded-For "
+                + "и X-Real-IP");
         t.put(CeilingParam.VIDEO_ALLOW_FILE_SOURCE, "Источники file: и test: у камер");
-        t.put(CeilingParam.VIDEO_ALLOWED_NETWORKS, "Сети, в которых допустимы камеры");
+        t.put(CeilingParam.VIDEO_ALLOWED_NETWORKS, "Сети, в которых допустимы камеры (пусто — любые)");
         t.put(CeilingParam.VIDEO_RETENTION_DAYS, "Срок хранения видео, дней");
         t.put(CeilingParam.VIDEO_PURGE_CREDENTIALS, "Стирать пароли камер при выключенном видео");
         t.put(CeilingParam.ADMIN_MODE, "Режим переключателей администратора");
         t.put(CeilingParam.ADMIN_DISABLE_ROLES, "Кто выключает функции переключателями");
         t.put(CeilingParam.ADMIN_ROLES, "Кто, кроме SECURITY, включает обратно (режим full)");
+        t.put(CeilingParam.MOBILE_READ_ONLY, "С телефона и планшета — только просмотр");
         t.put(CeilingParam.UI_INACTIVITY_MINUTES, "Автоблокировка интерфейса, минут без действий");
         t.put(CeilingParam.UI_WARNING_MINUTES, "Предупреждение до блокировки, минут");
         return t;
@@ -488,6 +517,15 @@ public class SecurityProfileService {
     private Map<String, Object> inbound(FeatureSnapshot snapshot, FeatureSnapshot ceiling,
                                         List<RuntimeInspector.Route> routes, Integer port) {
         Map<String, Object> section = new LinkedHashMap<>();
+        // Анонимный доступ (B5): режим табло, с каких адресов, доверенные прокси — факты раздела
+        section.put("items", PublicEndpoints.anonymousAccess(ceiling).stream().map(f -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("title", f.title());
+            item.put("value", f.value());
+            item.put("ok", f.ok());
+            item.put("note", f.note());
+            return item;
+        }).toList());
         section.put("port", port);
         section.put("address", ceiling.param(CeilingParam.SERVER_ADDRESS));
         section.put("tls", ceiling.boolParam(CeilingParam.SERVER_SSL_ENABLED));
@@ -551,14 +589,10 @@ public class SecurityProfileService {
         Set<String> hosts = new TreeSet<>();
         if (urls != null) {
             for (String url : urls) {
-                try {
-                    URI uri = URI.create(url == null ? "" : url.trim());
-                    String userInfo = uri.getRawUserInfo();
-                    if (userInfo != null && userInfo.indexOf(':') >= 0 && userInfo.indexOf(':') < userInfo.length() - 1) plain++;
-                    if (uri.getHost() != null) hosts.add(uri.getHost());
-                } catch (IllegalArgumentException e) {
-                    // Адрес не разбирается — не считаем ни хостом, ни паролем
-                }
+                CameraAddress address = cameraAddress(url);
+                if (address == null) continue;
+                if (address.withPassword()) plain++;
+                if (!address.host().isEmpty()) hosts.add(address.host());
             }
         }
         result.put("count", urls == null ? null : urls.size());
@@ -570,6 +604,42 @@ public class SecurityProfileService {
         // До пакета B11 пароль камеры передаётся ffmpeg в адресе -i (аргументы процесса)
         result.put("passwordInArgs", urls == null ? null : plain > 0);
         return result;
+    }
+
+    /** Хост камеры и есть ли в адресе пароль; сам пароль и логин наружу не отдаются */
+    record CameraAddress(String host, boolean withPassword) {
+    }
+
+    /**
+     * Разбор адреса камеры так же, как его разбирает FFmpeg (и VideoSource): адрес кончается на первом «/», «?» или
+     * «#», логин и пароль отделяются последним «@» — в пароле камеры «@» встречается, и {@link URI} такой адрес не
+     * разбирает (хоста и пароля не видно). Не rtsp:// (эмулятор file:, test:) — null
+     */
+    static CameraAddress cameraAddress(String url) {
+        if (url == null) return null;
+        String text = url.trim();
+        if (!text.regionMatches(true, 0, "rtsp://", 0, "rtsp://".length())) return null;
+        String rest = text.substring("rtsp://".length());
+        int end = rest.length();
+        for (char c : new char[]{'/', '?', '#'}) {
+            int i = rest.indexOf(c);
+            if (i >= 0 && i < end) end = i;
+        }
+        String authority = rest.substring(0, end);
+        int at = authority.lastIndexOf('@');
+        String userInfo = at < 0 ? "" : authority.substring(0, at);
+        String hostPort = authority.substring(at + 1);
+        int colon = userInfo.indexOf(':');
+        boolean password = colon >= 0 && colon < userInfo.length() - 1;
+        String host;
+        if (hostPort.startsWith("[")) {
+            int close = hostPort.indexOf(']');
+            host = close < 0 ? hostPort : hostPort.substring(1, close);
+        } else {
+            int portColon = hostPort.indexOf(':');
+            host = portColon < 0 ? hostPort : hostPort.substring(0, portColon);
+        }
+        return new CameraAddress(host.toLowerCase(Locale.ROOT), password);
     }
 
     static String databaseAddress(String url) {
@@ -816,7 +886,8 @@ public class SecurityProfileService {
         if (ceiling.ceilingFile() != null) {
             rows.add(selfCheckRow("Файл потолка не изменён", "Get-FileHash \"" + ceiling.ceilingFile()
                     + "\"   (Linux: sha256sum " + ceiling.ceilingFile() + ")", ceiling.ceilingFileExists()
-                    ? String.valueOf(ceiling.ceilingFileSha256()).toUpperCase(Locale.ROOT) : "файла нет — пресет isolated"));
+                    ? String.valueOf(ceiling.ceilingFileSha256()).toUpperCase(Locale.ROOT)
+                    : "файла нет — пресет " + ceiling.preset().key() + " («" + ceiling.preset().title() + "»)"));
             rows.add(selfCheckRow("Отпечаток профиля без запуска службы",
                     "java -jar dinamika_back.jar print-features --config=\"" + ceiling.ceilingFile() + "\"",
                     "отпечаток " + ceiling.fingerprint()));
@@ -949,8 +1020,14 @@ public class SecurityProfileService {
                 + (Boolean.TRUE.equals(dbUser.get("superuser")) ? " — сейчас это не так: приложение работает под "
                 + "суперпользователем." : ".") + " Кто управляет и сервером приложения, и ключом HMAC, тот может всё.");
         if (!journal.keyed()) {
-            caveats.add("Журнал профиля ведётся без ключа HMAC (ключа нет в файле секретов): цепочка SHA-256 выявляет "
+            caveats.add("Журнал профиля ведётся без ключа HMAC (ключ не задан): цепочка SHA-256 выявляет "
                     + "правку записей, но не подделку администратором БД с пересчётом цепочки.");
+        }
+        if (!ceiling.boolParam(CeilingParam.JOURNAL_REQUIRED)) {
+            caveats.add("Журналы не обязательны (awms.journal.required не задан): сбой записи журнала профиля не "
+                    + "останавливает службу, а не записанные в журнал доступа просмотр видео и смена камеры всё равно "
+                    + "выполняются — сбой виден только в логе AWMS.SECURITY. Для согласования рекомендуется "
+                    + "awms.journal.required=true в файле потолка.");
         }
         caveats.add("db".equals(roleSource) ? "Роли: роль пользователя берётся из БД на каждом запросе, ключ токенов — свой у установки."
                 : "Роли: до пакета B10 роль берётся из токена, а ключ токенов общий для всех установок — у функций с ролями "
@@ -964,8 +1041,13 @@ public class SecurityProfileService {
                     + "в зашифрованное хранилище; check-surface аргументы процессов не выводит.");
         }
         if (ceiling.isOn(Feature.ANONYMOUS)) {
-            caveats.add("Включён анонимный доступ (режим табло): часть API отвечает без входа — список в разделе «Входящие». "
-                    + "Перед выключением проверить, не ходят ли станции и табло в API без входа (открытый вопрос 15.1).");
+            List<String> networks = ceiling.listParam(CeilingParam.ANONYMOUS_ALLOWED_NETWORKS);
+            caveats.add("Включён анонимный доступ (режим табло): часть API отвечает без входа — список в разделе «Входящие», "
+                    + (networks.isEmpty() ? "с любого адреса сети. Ограничить адресами станций и табло — строкой "
+                    + CeilingParam.ANONYMOUS_ALLOWED_NETWORKS.key() + " в файле потолка"
+                    : "только с адресов " + String.join(", ", networks))
+                    + ". Перед выключением (anonymous=false) проверить по журналу доступа nginx, не ходят ли станции "
+                    + "и табло в API без входа (deploy/INSTALL.md, раздел 11).");
         }
         return caveats;
     }

@@ -669,16 +669,18 @@ public class NomenclatureController {
         return ResponseEntity.ok(nomenclatureService.getAverageRating(materialUid));
     }
 
+    /** Подпись отзыва — из входа, как у поставщиков; поле author от клиента не используется */
     @PostMapping("/{materialUid}/ratings")
     public ResponseEntity<MaterialRatingDTO> addRating(
             @PathVariable UUID materialUid,
-            @RequestBody AddRatingRequest request) {
-        return ResponseEntity.ok(nomenclatureService.addRating(materialUid, request));
+            @RequestBody AddRatingRequest request,
+            Authentication authentication) {
+        return ResponseEntity.ok(nomenclatureService.addRating(materialUid, request, author(authentication)));
     }
 
     @DeleteMapping("/ratings/{uid}")
-    public ResponseEntity<Void> deleteRating(@PathVariable UUID uid) {
-        nomenclatureService.deleteRating(uid);
+    public ResponseEntity<Void> deleteRating(@PathVariable UUID uid, Authentication authentication) {
+        nomenclatureService.deleteRating(uid, author(authentication));
         return ResponseEntity.ok().build();
     }
 

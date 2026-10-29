@@ -7,5 +7,6 @@ import lombok.Data;
 public class AddRatingRequest {
     private Integer rating;
     private String comment;
+    /** Не используется: подпись отзыва берётся из входа (старые клиенты ещё присылают) */
     private String author;
 }

@@ -98,7 +98,7 @@ public class OrdersCallbackKeyFilter extends OncePerRequestFilter {
         }
         String presented = request.getHeader(HEADER);
         if (expected == null || presented == null || !MessageDigest.isEqual(sha256(presented), expected)) {
-            reject(request, path, presented == null ? "нет заголовка " + HEADER
+            reject(request, presented == null ? "нет заголовка " + HEADER
                     : expected == null ? "ключ api.key.awms не задан" : "неверный ключ");
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return;
@@ -106,14 +106,19 @@ public class OrdersCallbackKeyFilter extends OncePerRequestFilter {
         chain.doFilter(request, response);
     }
 
-    /** WARN не чаще раза в минуту с числом отказов; ключ в лог не пишется, путь — с экранированием */
-    private void reject(HttpServletRequest request, String path, String reason) {
+    /**
+     * WARN не чаще раза в минуту с числом отказов; ключ в лог не пишется. Путь — сырой, как пришёл (getRequestURI, с
+     * %XX), и с экранированием: раскодированный путь с пробелами позволил бы присланному адресу выглядеть в журнале
+     * безопасности служебной строкой (например, головой цепочки JOURNAL_HEAD)
+     */
+    private void reject(HttpServletRequest request, String reason) {
         long count = rejected.incrementAndGet();
         long now = clock.millis();
         long last = lastWarn.get();
         if ((last == 0 || now - last >= WARN_INTERVAL_MILLIS) && lastWarn.compareAndSet(last, now)) {
             SECURITY.warn("Колбэк заказов отклонён (401): {} {} с адреса {} — {}; отказов с запуска: {}",
-                    forLog(request.getMethod()), forLog(path), request.getRemoteAddr(), reason, count);
+                    forLog(request.getMethod()), forLog(request.getRequestURI()), request.getRemoteAddr(), reason,
+                    count);
         }
     }
 
@@ -148,8 +153,8 @@ public class OrdersCallbackKeyFilter extends OncePerRequestFilter {
 
     /**
      * Регистрация фильтра (только при функции orders): порядок по умолчанию — после Spring Security. Проверка ключа
-     * включается явно — awms.orders.callback-key-required=true в application.properties: до выключателей колбэки
-     * принимались без ключа, и внешняя система может его не присылать
+     * включается явно — awms.orders.callback-key-required=true в файле потолка (параметр безопасности, входит в
+     * отпечаток и отчёт): до выключателей колбэки принимались без ключа, и внешняя система может его не присылать
      */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnFeature(Feature.ORDERS)

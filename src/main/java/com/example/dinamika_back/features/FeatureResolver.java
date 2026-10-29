@@ -57,14 +57,19 @@ import java.util.regex.Pattern;
  *
  * <p>Правила:
  * <ol>
- *   <li>Белый список потолка — {@code awms.features.*} и параметры {@link CeilingParam}. Значения принимаются только
- *       из файла потолка, умолчаний jar ({@code application.properties}) и тестового контекста. Переменная окружения,
- *       системное свойство, аргумент командной строки, SPRING_APPLICATION_JSON или другой файл конфигурации
- *       с ключом белого списка → {@link FeatureConfigurationException}, запуск отменяется. Исключения:
- *       {@code AWMS_FEATURES_FILE} (только путь) и {@code AWMS_FEATURES_PRESET} — только когда файла потолка нет.</li>
+ *   <li>Белый список потолка — {@code awms.features.*} и параметры {@link CeilingParam}. Выключатели
+ *       {@code awms.features.*} принимаются только из файла потолка, умолчаний jar ({@code application.properties}) и
+ *       тестового контекста: переменная окружения, системное свойство, аргумент командной строки,
+ *       SPRING_APPLICATION_JSON или другой файл конфигурации с таким ключом → {@link FeatureConfigurationException},
+ *       запуск отменяется. Исключения: {@code AWMS_FEATURES_FILE} (только путь) и {@code AWMS_FEATURES_PRESET} —
+ *       только когда файла потолка нет. Параметры безопасности ({@code server.port} и др.) из этих источников, как до
+ *       выключателей, применяются с предупреждением в лог и шапку отчёта: отпечаток службы тогда расходится с
+ *       print-features.</li>
  *   <li>В файле потолка — только белый список: {@code spring.config.import}, {@code jwt.*}, {@code logging.*} и т. п.
- *       отменяют запуск. Подстановки {@code ${…}} в значениях белого списка запрещены.</li>
- *   <li>Нет пресета → {@code isolated} (fail-closed) с предупреждением.</li>
+ *       отменяют запуск. Подстановки {@code ${…}} запрещены в файле потолка, умолчаниях jar и выключателях; в параметре
+ *       безопасности вне файла (например {@code --server.port=${PORT:8084}}) их разрешает окружение, как Spring.</li>
+ *   <li>Нет пресета (нет файла потолка или ключа в нём) → {@code full}, как до выключателей, с предупреждением.
+ *       Сузить набор (standard, isolated) можно только явным пресетом в файле потолка.</li>
  *   <li>Неизвестная функция или пресет → исключение; опечатка в имени переменной окружения тоже ловится.</li>
  *   <li>Выключенный родитель или requires выключает функцию с причиной {@code DEPENDENCY:<ключ>}.</li>
  *   <li>Нет класса-маркера в jar → {@code ABSENT_IN_BUILD}.</li>
@@ -173,7 +178,7 @@ public final class FeatureResolver {
         if (!(environment instanceof ConfigurableEnvironment configurable)) {
             throw new IllegalArgumentException("Нужен ConfigurableEnvironment");
         }
-        Sources sources = new Sources(configurable.getPropertySources(), ceiling, exists);
+        Sources sources = new Sources(configurable, ceiling, exists);
         sources.verify();
         List<String> warnings = new ArrayList<>();
 
@@ -248,9 +253,10 @@ public final class FeatureResolver {
                 raw = found.value();
                 origin = found.originText();
             } else if (p == CeilingParam.WEBSOCKET_ALLOWED_ORIGINS) {
-                // Как до выключателей: подключение с любого источника; ограничить — явным списком в файле потолка
+                // Как до выключателей: «*» — без своего сужения. Чужой Origin рукопожатия всё равно отсекает CORS
+                // Spring Security (403): проходят адреса CORS и тот же источник. Сузить — явным списком в файле потолка
                 raw = "*";
-                origin = "умолчание (как раньше: любой источник)";
+                origin = "умолчание (как раньше: адреса CORS и тот же источник)";
             } else {
                 raw = p.defaultValue();
                 origin = "умолчание";
@@ -258,6 +264,7 @@ public final class FeatureResolver {
             params.put(p, p.normalize(raw, origin));
             origins.put(p, origin);
         }
+        warnings.addAll(sources.outside.values());
         if ("full".equals(params.get(CeilingParam.ADMIN_MODE)) && params.get(CeilingParam.ADMIN_ROLES).isEmpty()) {
             throw new FeatureConfigurationException("awms.features.admin.mode=full требует awms.features.admin.roles: "
                     + "кто, кроме SECURITY, включает функции обратно");
@@ -366,7 +373,10 @@ public final class FeatureResolver {
         OTHER
     }
 
-    /** Найденное значение: сырое (без подстановок), вид источника и текст источника для лога и отчёта */
+    /**
+     * Найденное значение: как записано (подстановки ${…} допустимы только у параметров безопасности вне файла потолка —
+     * у них значение уже разрешено окружением), вид источника и текст источника для лога и отчёта
+     */
     record Found(String value, Kind kind, String originText) {
     }
 
@@ -375,8 +385,14 @@ public final class FeatureResolver {
         private final List<PropertySource<?>> sources = new ArrayList<>();
         private final Path ceiling;
         private final boolean ceilingExists;
+        /** Параметры безопасности, заданные вне файла потолка: ключ → предупреждение */
+        private final Map<String, String> outside = new LinkedHashMap<>();
+        /** Окружение: подстановки ${…} в параметрах вне файла потолка разрешает оно, как Spring при запуске */
+        private final ConfigurableEnvironment environment;
 
-        Sources(MutablePropertySources propertySources, Path ceiling, boolean ceilingExists) {
+        Sources(ConfigurableEnvironment environment, Path ceiling, boolean ceilingExists) {
+            this.environment = environment;
+            MutablePropertySources propertySources = environment.getPropertySources();
             for (PropertySource<?> ps : propertySources) {
                 // Обёртка configurationProperties повторяет все источники — её пропускаем
                 if (ConfigurationPropertySources.isAttachedConfigurationPropertySource(ps)) continue;
@@ -428,10 +444,13 @@ public final class FeatureResolver {
             Kind kind = kind(ps, origin);
             if (kind == Kind.CEILING || kind == Kind.JAR || kind == Kind.TEST) return;
             // Не отказ, а предупреждение: служба сервера может задавать порт, адрес и т. п. аргументами или окружением —
-            // так было до выключателей, и запуск из-за этого не должен ломаться. Значение применяется как раньше,
-            // но в отпечаток профиля оно не попадает — отчёт для ИБ увидит это по предупреждению в логе
-            LOG.warn("Параметр «{}» задан вне файла потолка: {}. Он применяется, но профиль функций его не учитывает; "
-                    + "для согласования с ИБ перенесите значение в файл потолка {}", key, describe(ps, origin, key), ceiling);
+            // так было до выключателей, и запуск из-за этого не должен ломаться. Значение применяется как раньше и входит
+            // в отпечаток службы, а CLI print-features окружения службы не видит: отпечатки разойдутся. Предупреждение
+            // попадает в лог один раз на ключ и в предупреждения профиля (шапка отчёта «Профиль безопасности»)
+            String message = "Параметр «" + key + "» задан вне файла потолка: " + describe(ps, origin, key)
+                    + ". Значение применяется и входит в отпечаток службы, но print-features по файлу потолка его не "
+                    + "видит — отпечатки разойдутся. Для согласования с ИБ перенесите значение в файл потолка " + ceiling;
+            if (outside.putIfAbsent(key, message) == null) LOG.warn(message);
         }
 
         /** Выключатель awms.features.* — только из файла потолка, умолчаний jar или теста, иначе отказ запуска */
@@ -499,21 +518,30 @@ public final class FeatureResolver {
                 if (prop == null || prop.getValue() == null) continue;
                 String value = String.valueOf(prop.getValue()).trim();
                 Origin origin = prop.getOrigin();
-                if (value.contains("${")) {
-                    throw new FeatureConfigurationException("Ключ «" + name + "» (" + describe(ps, origin, name.toString())
-                            + "): подстановки ${…} в профиле функций запрещены — значение должно быть записано в файле "
-                            + "потолка явно");
-                }
                 Kind kind = kind(ps, origin);
+                boolean feature = ROOT.isAncestorOf(name) && CeilingParam.byName(name) == null;
                 // Действующее значение — только из допустимого источника. verify() перебирает лишь перечислимые
                 // источники; ключ из неперечислимого (JNDI и т. п.) ловится здесь. Выключатели awms.features.*
                 // вне потолка — по-прежнему отказ; параметры безопасности — предупреждение (checkSource)
                 if (!(kind == Kind.ENV && name.equals(PRESET) && !ceilingExists)) {
-                    if (ROOT.isAncestorOf(name) && CeilingParam.byName(name) == null) {
+                    if (feature) {
                         checkFeatureSource(ps, origin, name.toString());
                     } else {
                         checkSource(ps, origin, name.toString());
                     }
+                }
+                if (value.contains("${")) {
+                    // В файле потолка (и умолчаниях jar) значение записывается явно: его читает ИБ и print-features,
+                    // подстановка из окружения подменила бы его мимо файла. Выключатели — так же из любого источника
+                    if (feature || kind == Kind.CEILING || kind == Kind.JAR || kind == Kind.TEST) {
+                        throw new FeatureConfigurationException("Ключ «" + name + "» (" + describe(ps, origin,
+                                name.toString()) + "): подстановки ${…} в профиле функций запрещены — значение должно "
+                                + "быть записано в файле потолка явно");
+                    }
+                    // Параметр вне файла потолка (окружение, аргумент, внешний конфиг), например
+                    // --server.port=${PORT:8084}: как до выключателей, подстановку разрешает окружение, запуск не
+                    // отменяется; предупреждение «задан вне файла потолка» уже есть (checkSource)
+                    value = environment.resolvePlaceholders(value).trim();
                 }
                 return new Found(value, kind, originText(kind, ps, origin, name.toString()));
             }

@@ -260,6 +260,11 @@ class FeatureResolverTest {
                 new SimpleCommandLinePropertySource("--server.port=9100")));
         assertThat(argument.param(CeilingParam.SERVER_PORT)).isEqualTo("9100");
         assertThat(output.getAll()).contains("--server.port");
+        // Значение входит в отпечаток службы, а print-features его не видит: предупреждение — и в профиль (шапка
+        // отчёта), один раз на ключ
+        assertThat(argument.fingerprint()).isNotEqualTo(resolve(environment(Map.of(), file)).fingerprint());
+        assertThat(argument.warnings()).filteredOn(w -> w.contains("server.port")).singleElement()
+                .satisfies(w -> assertThat(w).contains("--server.port").contains("отпечатки разойдутся"));
 
         // Выключатели функций окружением и аргументами — по-прежнему отказ запуска
         assertThatThrownBy(() -> resolve(environment(Map.of(), file,
@@ -272,6 +277,42 @@ class FeatureResolverTest {
                 new PropertiesPropertySource(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME, feature))))
                 .isInstanceOf(FeatureConfigurationException.class)
                 .hasMessageContaining("awms.features.video.enabled");
+    }
+
+    @Test
+    void placeholdersOutsideCeilingFileAreResolvedWithWarning(CapturedOutput output) throws IOException {
+        // Правило сервера: параметр белого списка из аргументов или внешнего конфига — предупреждение, а не отказ,
+        // и с подстановкой тоже (--server.port=${PORT:8084}); подстановку разрешает окружение, как Spring при запуске
+        Path file = ceiling("awms.features.preset=full\n");
+        FeatureSnapshot withPort = resolve(environment(Map.of("PORT", "9300"), file,
+                new SimpleCommandLinePropertySource("--server.port=${PORT:8084}")));
+        assertThat(withPort.param(CeilingParam.SERVER_PORT)).isEqualTo("9300");
+        assertThat(withPort.warnings()).filteredOn(w -> w.contains("server.port")).singleElement()
+                .satisfies(w -> assertThat(w).contains("--server.port").contains("вне файла потолка"));
+        assertThat(output.getAll()).contains("WARN").contains("--server.port");
+
+        FeatureSnapshot byDefault = resolve(environment(Map.of(), file,
+                new SimpleCommandLinePropertySource("--server.port=${PORT:8084}", "--server.address=${ADDR:127.0.0.1}")));
+        assertThat(byDefault.param(CeilingParam.SERVER_PORT)).isEqualTo("8084");
+        assertThat(byDefault.param(CeilingParam.SERVER_ADDRESS)).isEqualTo("127.0.0.1");
+
+        Path other = dir.resolve("external.properties");
+        Files.writeString(other, "server.port=${PORT:8084}\nawms.cors.allowed-origins=${SITE:http://site.example}\n");
+        PropertySource<?> external = new PropertiesPropertySourceLoader()
+                .load("external", new FileSystemResource(other)).get(0);
+        FeatureSnapshot fromFile = resolve(environment(Map.of("PORT", "9400"), file, external));
+        assertThat(fromFile.param(CeilingParam.SERVER_PORT)).isEqualTo("9400");
+        assertThat(fromFile.listParam(CeilingParam.CORS_ALLOWED_ORIGINS)).containsExactly("http://site.example");
+
+        // Выключатели и файл потолка — по-прежнему без подстановок
+        assertThatThrownBy(() -> resolve(environment(Map.of("X", "false"), file,
+                new SimpleCommandLinePropertySource("--awms.features.video.enabled=${X}"))))
+                .isInstanceOf(FeatureConfigurationException.class)
+                .hasMessageContaining("awms.features.video.enabled");
+        Path withPlaceholder = ceiling("awms.features.preset=full\nserver.port=${PORT:8084}\n");
+        assertThatThrownBy(() -> resolve(environment(Map.of("PORT", "9300"), withPlaceholder)))
+                .isInstanceOf(FeatureConfigurationException.class)
+                .hasMessageContaining("подстановки");
     }
 
     @Test
@@ -353,13 +394,13 @@ class FeatureResolverTest {
         assertThat(s.intParam(CeilingParam.VIDEO_RETENTION_DAYS)).isEqualTo(30);
         assertThat(s.param(CeilingParam.ADMIN_MODE)).isEqualTo("disable-only");
         assertThat(s.param(CeilingParam.ADMIN_DISABLE_ROLES)).isEqualTo("ADMIN,SECURITY");
-        // Как до выключателей: пустые списки — без ограничений, WebSocket — с любого источника,
-        // дополнительных адресов CORS нет (прежний список — в SecurityConfig)
+        // Как до выключателей: пустые списки — без ограничений, WebSocket — «*» (своего сужения нет, чужой Origin
+        // отсекает CORS Spring Security), дополнительных адресов CORS нет (прежний список — в SecurityConfig)
         assertThat(s.param(CeilingParam.NETWORK_OUTBOUND_ALLOWED)).isEmpty();
         assertThat(s.param(CeilingParam.VIDEO_ALLOWED_NETWORKS)).isEmpty();
         assertThat(s.listParam(CeilingParam.CORS_ALLOWED_ORIGINS)).isEmpty();
         assertThat(s.listParam(CeilingParam.WEBSOCKET_ALLOWED_ORIGINS)).containsExactly("*");
-        assertThat(s.paramOrigin(CeilingParam.WEBSOCKET_ALLOWED_ORIGINS)).contains("любой источник");
+        assertThat(s.paramOrigin(CeilingParam.WEBSOCKET_ALLOWED_ORIGINS)).contains("адреса CORS и тот же источник");
         // Явный список в файле потолка ограничивает
         FeatureSnapshot ws = resolve(environment(Map.of(), ceiling(
                 "awms.features.preset=full\nawms.websocket.allowed-origins=https://awms.zavod.local\n")));

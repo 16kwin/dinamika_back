@@ -47,7 +47,8 @@ import java.util.TreeMap;
  *   <li>Запись — только добавлением, в транзакции с {@code pg_advisory_xact_lock}: у каждой строки свой предыдущий
  *       хэш, {@code row_hash} — HMAC с ключом вне БД ({@link JournalHmac}).</li>
  *   <li>После каждой записи (после фиксации транзакции) в файловый лог {@code AWMS.SECURITY} уходит строка
- *       {@code JOURNAL_HEAD id=… hash=…}: удаление хвоста журнала выявляет сверка головы с логом и с бумагой.</li>
+ *       {@code JOURNAL_HEAD id=… hash=…} (логгер {@value #HEAD_LOGGER}): удаление хвоста журнала выявляет сверка
+ *       головы с логом и с бумагой.</li>
  *   <li>Отпечаток, пресет, основание и SHA-256 файла потолка подставляются в каждую запись сами; автор и адрес — из
  *       текущего запроса, вне запроса — учётная запись ОС службы.</li>
  * </ul>
@@ -57,8 +58,19 @@ public class FeatureJournal {
 
     /** Логгер файлового журнала безопасности: logs/awms-security.log (logback-spring.xml) */
     public static final Logger SECURITY = LoggerFactory.getLogger("AWMS.SECURITY");
+    /**
+     * Логгер строк головы цепочки — дочерний к AWMS.SECURITY, пишет в тот же файл. Им пишется только строка головы,
+     * и сверка при старте принимает только его строки: маркер в чужом сообщении (путь запроса, имя) головой не станет
+     */
+    public static final String HEAD_LOGGER = "AWMS.SECURITY.HEAD";
     /** Строка головы цепочки в файловом логе; её же ищет сверка при старте */
     public static final String HEAD_MARKER = "JOURNAL_HEAD";
+    private static final Logger HEAD_LOG = LoggerFactory.getLogger(HEAD_LOGGER);
+    /**
+     * Атрибут запроса с адресом клиента, разобранным за доверенным прокси (X-Forwarded-For / X-Real-IP — только от
+     * доверенных адресов прокси; ставит пакет B5). Журналы берут адрес отсюда, без атрибута — getRemoteAddr()
+     */
+    public static final String CLIENT_IP_ATTRIBUTE = "awms.clientIp";
 
     /** Ключ блокировки цепочки (pg_advisory_xact_lock): «AWMSJRNL» */
     static final long LOCK_KEY = 0x41574D534A524E4CL;
@@ -134,7 +146,7 @@ public class FeatureJournal {
         repository.save(e);
         e.setFresh(false);
 
-        afterCommit(() -> SECURITY.info("{} id={} hash={} type={}", HEAD_MARKER, e.getId(), e.getRowHash(),
+        afterCommit(() -> HEAD_LOG.info("{} id={} hash={} type={}", HEAD_MARKER, e.getId(), e.getRowHash(),
                 e.getEventType()));
         return e;
     }
@@ -237,12 +249,19 @@ public class FeatureJournal {
 
     // ===================== Служебное =====================
 
-    /** Кто действует: вошедший пользователь и адрес запроса; вне запроса — учётная запись ОС службы */
+    /**
+     * Кто действует: вошедший пользователь и адрес запроса; вне запроса — учётная запись ОС службы. Адрес — атрибут
+     * запроса {@link #CLIENT_IP_ATTRIBUTE}, если его поставил разбор адреса клиента за доверенным прокси (пакет B5),
+     * иначе адрес соединения (за nginx это адрес nginx)
+     */
     public static Actor currentActor() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String ip = null;
         RequestAttributes attributes = RequestContextHolder.getRequestAttributes();
-        if (attributes instanceof ServletRequestAttributes servlet) ip = servlet.getRequest().getRemoteAddr();
+        if (attributes instanceof ServletRequestAttributes servlet) {
+            Object resolved = servlet.getRequest().getAttribute(CLIENT_IP_ATTRIBUTE);
+            ip = resolved instanceof String s && !s.isBlank() ? s : servlet.getRequest().getRemoteAddr();
+        }
         if (authentication != null && authentication.isAuthenticated()
                 && !(authentication instanceof AnonymousAuthenticationToken) && authentication.getName() != null) {
             String role = authentication.getAuthorities().stream().map(GrantedAuthority::getAuthority)

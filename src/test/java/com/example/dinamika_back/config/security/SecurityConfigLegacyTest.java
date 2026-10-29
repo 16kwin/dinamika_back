@@ -25,10 +25,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * SecurityConfig «как до выключателей» (откат 19.10): правила доступа по потолку не применяются. Справочники
+ * SecurityConfig «как до выключателей» (откат 19.10): прежние правила main не переписаны. Справочники
  * читаются без входа, меняются только после входа и с CSRF-токеном; флаги функций до входа открыты; CORS — прежний
  * жёсткий список сервера и стенда плюс дополнительные адреса из {@code awms.cors.allowed-origins}.
- * Тесты правил по потолку лежат в docs/switches-work/rollback-2026-10-19/tests и вернутся вместе с правилами.
+ * Слой правил потолка поверх них проверяют AccessMatrix*Test, AnonymousAccessTest, AnonymousNetworksTest,
+ * FeatureRoles*Test и SecurityRoleReadOnlyTest.
  */
 @WebMvcTest(controllers = FeaturesController.class)
 @Import({SecurityConfig.class, FeatureService.class, SecurityProbe.class})

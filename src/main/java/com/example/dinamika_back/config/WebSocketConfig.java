@@ -29,8 +29,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * clientInbound/clientOutbound/brokerChannel, ни планировщика SockJS; публикации идут в {@code NoopLiveUpdates}.
  *
  * <ul>
- *   <li>Источники (Origin) — из {@code awms.websocket.allowed-origins}, по умолчанию тот же список, что у CORS.
- *       Пустой список — только тот же источник (без {@code "*"}).</li>
+ *   <li>Источники (Origin) — из {@code awms.websocket.allowed-origins}. По умолчанию {@code "*"}, как до
+ *       выключателей: своей проверки нет, но рукопожатие с чужим Origin отсекает CORS Spring Security (403) —
+ *       проходят адреса CORS (прежний список и {@code awms.cors.allowed-origins}) и тот же источник. Явный список
+ *       сужает дальше; пустой — только тот же источник.</li>
  *   <li>Клиент SockJS для iframe-транспорта — локальный {@value #SOCKJS_CLIENT_URL} (файл фронтенда
  *       public/vendor/sockjs), а не CDN, на который Spring ссылается по умолчанию. При непустом списке источников
  *       Spring iframe-транспорт не обслуживает вовсе; ссылка нужна в режиме «только тот же источник».</li>
@@ -69,8 +71,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         } else {
             if (origins.contains("*")) {
                 // Так было до выключателей; ограничить — явным списком awms.websocket.allowed-origins в файле потолка
-                log.info("WebSocket /ws-stations: подключение с любого источника (awms.websocket.allowed-origins не "
-                        + "ограничен)");
+                log.info("WebSocket /ws-stations: awms.websocket.allowed-origins не сужает — подключение с адресов CORS "
+                        + "и того же источника, как раньше");
             }
             endpoint.setAllowedOriginPatterns(origins.toArray(String[]::new));
         }

@@ -52,8 +52,8 @@ public class SecurityRoleReadOnlyFilter extends OncePerRequestFilter {
         chain.doFilter(request, response);
     }
 
-    /** Без управляющих символов и не длиннее предела: подделать строку лога нельзя */
-    private static String forLog(String value) {
+    /** Без управляющих символов и не длиннее предела: подделать строку лога нельзя (им же пользуется CeilingAccessFilter) */
+    static String forLog(String value) {
         if (value == null) return "";
         StringBuilder out = new StringBuilder(Math.min(value.length(), LOG_PATH_MAX) + 1);
         for (int i = 0; i < value.length(); i++) {
