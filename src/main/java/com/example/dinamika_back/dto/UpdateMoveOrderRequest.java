@@ -13,6 +13,7 @@ public class UpdateMoveOrderRequest {
     private LocalDateTime docDatetime;
     private String stockToUid;
     private String comment;
+    private Boolean useApproval;
     private List<UpdateMoveOrderLineRequest> lines;
 
     @Getter

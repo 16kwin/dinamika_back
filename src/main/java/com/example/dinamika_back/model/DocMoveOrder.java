@@ -31,8 +31,11 @@ public class DocMoveOrder {
     @Column(name = "deadline")
     private LocalDateTime deadline;
 
-    @Column(name = "comment", columnDefinition = "TEXT")
+    @Column(name = "comment")
     private String comment;
+
+    @Column(name = "use_approval", nullable = false)
+    private Boolean useApproval;
 
     @Column(name = "status", nullable = false)
     private String status;
@@ -47,6 +50,7 @@ public class DocMoveOrder {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
+        if (useApproval == null) useApproval = Boolean.TRUE;
     }
 
     @PreUpdate

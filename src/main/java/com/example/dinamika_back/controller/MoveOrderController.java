@@ -57,14 +57,34 @@ public class MoveOrderController {
 
     // ==================== STATUS ACTIONS ====================
 
-    @PostMapping("/{uid}/accept")
-    public ResponseEntity<MoveOrderFlatDto> accept(@PathVariable UUID uid) {
-        return ResponseEntity.ok(moveOrderService.accept(uid, userService.getCurrentUsername()));
+    /** DRAFT → ON_APPROVAL (только если useApproval = true). */
+    @PostMapping("/{uid}/submit-approval")
+    public ResponseEntity<MoveOrderFlatDto> submitForApproval(@PathVariable UUID uid) {
+        return ResponseEntity.ok(moveOrderService.submitForApproval(uid, userService.getCurrentUsername()));
     }
 
-    @PostMapping("/{uid}/post")
-    public ResponseEntity<MoveOrderFlatDto> post(@PathVariable UUID uid) {
-        return ResponseEntity.ok(moveOrderService.post(uid, userService.getCurrentUsername()));
+    /** ON_APPROVAL → APPROVED, создаёт документы перемещения. */
+    @PostMapping("/{uid}/approve")
+    public ResponseEntity<MoveOrderFlatDto> approve(@PathVariable UUID uid) {
+        return ResponseEntity.ok(moveOrderService.approve(uid, userService.getCurrentUsername()));
+    }
+
+    /** ON_APPROVAL → REJECTED. */
+    @PostMapping("/{uid}/reject")
+    public ResponseEntity<MoveOrderFlatDto> reject(@PathVariable UUID uid) {
+        return ResponseEntity.ok(moveOrderService.reject(uid, userService.getCurrentUsername()));
+    }
+
+    /** DRAFT → IN_PROGRESS (когда useApproval = false), создаёт документы перемещения. */
+    @PostMapping("/{uid}/take-to-work")
+    public ResponseEntity<MoveOrderFlatDto> takeToWork(@PathVariable UUID uid) {
+        return ResponseEntity.ok(moveOrderService.takeToWork(uid, userService.getCurrentUsername()));
+    }
+
+    /** DRAFT/ON_APPROVAL → CANCELLED. */
+    @PostMapping("/{uid}/cancel")
+    public ResponseEntity<MoveOrderFlatDto> cancel(@PathVariable UUID uid) {
+        return ResponseEntity.ok(moveOrderService.cancel(uid, userService.getCurrentUsername()));
     }
 
     // ==================== Events ====================

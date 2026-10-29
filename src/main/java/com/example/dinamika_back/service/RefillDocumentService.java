@@ -33,7 +33,14 @@ public class RefillDocumentService {
     private final SprCellAssignmentRepository cellAssignmentRepository;
     private final StockRegisterService stockRegisterService;
 
+    // === Новые зависимости для ретроспективного перемещения ===
+    private final DocTransferRepository docTransferRepository;
+    private final RegTransferLineRepository transferLineRepository;
+
     private static final ObjectMapper objectMapper = new ObjectMapper();
+
+    private static final String TRANSFER_POSTED = "POSTED";
+    private static final String BASE_REFILL     = "REFILL";
 
     private static final List<String> ALL_COLUMNS_ORDER = List.of(
             "code", "docDatetime", "stationName", "templateName",
@@ -329,7 +336,6 @@ public class RefillDocumentService {
                         .drumNumber(rc.getDrumNumber())
                         .columnNumber(rc.getColumnNumber())
                         .numberCell(rc.getNumberCell())
-                        // Снимковые поля НЕ фиксируем при create — заполним при post
                         .templateQuantity(null)
                         .factQuantity(null)
                         .minStockSnapshot(null)
@@ -375,7 +381,6 @@ public class RefillDocumentService {
                         .numberCell(tc.getNumberCell())
                         .cellAssignment(tc.getCellAssignment())
                         .material(tc.getMaterial())
-                        // Снимковые поля НЕ фиксируем при create — заполним при post
                         .templateQuantity(null)
                         .factQuantity(null)
                         .minStockSnapshot(null)
@@ -530,7 +535,6 @@ public class RefillDocumentService {
         List<RegRefillCell> cells = cellRepository.findByDocUid(uid);
 
         // === ФИКСАЦИЯ СНИМКА ПЕРЕД ПРОВЕДЕНИЕМ ===
-        // Тянем живые значения из источников: reg_cells шаблона, reg_station_cells, reg_stock_level_control.
         UUID templateUid = doc.getTemplate() != null ? doc.getTemplate().getUid() : null;
         Map<String, RegCells> templateCellsByAddr = new HashMap<>();
         if (templateUid != null) {
@@ -546,17 +550,14 @@ public class RefillDocumentService {
         for (RegRefillCell c : cells) {
             String addrKey = cellKey(c.getDrumNumber(), c.getColumnNumber(), c.getNumberCell());
 
-            // template_quantity — из reg_cells (актуальная схема)
             RegCells tc = templateCellsByAddr.get(addrKey);
             if (tc != null && tc.getQuantity() != null) {
                 c.setTemplateQuantity(tc.getQuantity());
             }
 
-            // fact_quantity — из reg_station_cells (факт на момент проведения)
             RegStationCell sc = stationCellsByAddr.get(addrKey);
             c.setFactQuantity(sc != null ? (sc.getQuantity() != null ? sc.getQuantity() : 0) : 0);
 
-            // пороги КУО — из reg_stock_level_control по паре (station, material)
             if (c.getMaterial() != null) {
                 regStockLevelControlRepository
                         .findByStationUidAndMaterialUid(stationUid, c.getMaterial().getUid())
@@ -614,6 +615,9 @@ public class RefillDocumentService {
         // === РЕГИСТР СКЛАДА: закрываем бронь ===
         stockRegisterService.commitByDoc(uid, author);
 
+        // === РЕТРОСПЕКТИВНОЕ ПЕРЕМЕЩЕНИЕ (baseType = REFILL, status = POSTED) ===
+        createPostedTransferForRefill(doc, cells, stationUid);
+
         doc.setStatus("POSTED");
         docRepository.save(doc);
 
@@ -638,6 +642,49 @@ public class RefillDocumentService {
     }
 
     // ==================== PRIVATE ====================
+
+    /** Создаёт ретроспективное перемещение MAIN → станция в статусе POSTED. */
+    private void createPostedTransferForRefill(DocRefill doc, List<RegRefillCell> cells, String stationUid) {
+        DocTransfer transfer = DocTransfer.builder()
+                .uid(UUID.randomUUID())
+                .code(nextTransferCode())
+                .docDatetime(LocalDateTime.now())
+                .docBaseUid(doc.getUid())
+                .docBaseType(BASE_REFILL)
+                .stockFromUid("MAIN")
+                .stockToUid(stationUid)
+                .status(TRANSFER_POSTED)
+                .priority("MEDIUM")
+                .dueDate(null)
+                .agreed(null)
+                .cancelled(Boolean.FALSE)
+                .operatorUid(null)
+                .closedAt(LocalDateTime.now())
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        transfer = docTransferRepository.save(transfer);
+
+        for (RegRefillCell c : cells) {
+            Integer q = c.getRefillQuantity();
+            if (q == null || q <= 0 || c.getMaterial() == null) continue;
+            RegTransferLine tl = RegTransferLine.builder()
+                    .uid(UUID.randomUUID())
+                    .transfer(transfer)
+                    .material(c.getMaterial())
+                    .quantity(q)
+                    .batchInfo(null)
+                    .createdAt(LocalDateTime.now())
+                    .updatedAt(LocalDateTime.now())
+                    .build();
+            transferLineRepository.save(tl);
+        }
+    }
+
+    private Integer nextTransferCode() {
+        Integer max = docTransferRepository.findMaxCode();
+        return max != null ? max + 1 : 1;
+    }
 
     private String buildUserName(User u) {
         if (u == null) return null;
@@ -764,8 +811,6 @@ public class RefillDocumentService {
 
         List<RegRefillCell> cells = cellRepository.findByDocUid(doc.getUid());
 
-        // Для черновика (NEW/SAVED) — снимковые поля тянем ЖИВЫЕ из источников.
-        // Для POSTED — берём как есть из документа (снимок зафиксирован).
         boolean isDraft = !"POSTED".equals(doc.getStatus());
         if (isDraft) {
             cells = refreshLiveSnapshotForDraft(doc, cells);
@@ -776,13 +821,6 @@ public class RefillDocumentService {
         return dto;
     }
 
-    /**
-     * Перезапрашивает актуальные значения templateQuantity, factQuantity,
-     * minStockSnapshot, criticalStockSnapshot, stockControlExists из живых источников
-     * (reg_cells шаблона, reg_station_cells, reg_stock_level_control) и накладывает их
-     * поверх ячеек документа. НЕ сохраняет в БД — только для отдачи наружу.
-     * Используется для черновиков (NEW/SAVED).
-     */
     private List<RegRefillCell> refreshLiveSnapshotForDraft(DocRefill doc, List<RegRefillCell> cells) {
         if (cells.isEmpty()) return cells;
 
@@ -803,7 +841,6 @@ public class RefillDocumentService {
             }
         }
 
-        // Пороги КУО кэшируем по materialUid
         Map<UUID, Optional<RegStockLevelControl>> kuoCache = new HashMap<>();
 
         for (RegRefillCell c : cells) {

@@ -15,6 +15,7 @@ public class CreateMoveOrderRequest {
     private LocalDateTime docDatetime;
     private String stockToUid;
     private String comment;
+    private Boolean useApproval;
     private List<MoveOrderLineRequest> lines;
 
     @Getter

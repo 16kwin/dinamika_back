@@ -1,4 +1,4 @@
-// DocTransfer.java — ПОЛНЫЙ ФАЙЛ (добавлено closedAt)
+// DocTransfer.java — ПОЛНЫЙ ФАЙЛ (V25: priority, due_date, operator_uid, agreed, cancelled)
 package com.example.dinamika_back.model;
 
 import jakarta.persistence.*;
@@ -39,6 +39,21 @@ public class DocTransfer {
 
     @Column(name = "status", nullable = false)
     private String status;
+
+    @Column(name = "priority")
+    private String priority;
+
+    @Column(name = "due_date")
+    private LocalDateTime dueDate;
+
+    @Column(name = "operator_uid")
+    private UUID operatorUid;
+
+    @Column(name = "agreed")
+    private Boolean agreed;
+
+    @Column(name = "cancelled")
+    private Boolean cancelled;
 
     @Column(name = "closed_at")
     private LocalDateTime closedAt;

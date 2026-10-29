@@ -19,6 +19,7 @@ public class MoveOrderFlatDto {
     private String stockToName;
     private LocalDateTime deadline;
     private String comment;
+    private Boolean useApproval;
     private String status;
     private List<MoveOrderLineDto> lines;
 }
